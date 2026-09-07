@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% if saved %}
+<div class="banner ok">Settings saved to <code>config.yaml</code>.{% if restart_needed %} Server/network changes will take effect after you restart the simulator.{% endif %}</div>
+{% endif %}
+{% if errors %}
+<div class="banner err">Couldn't save settings:
+  <ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2>Status</h2>
+  <div class="status-row">
+    <div><span class="k">Connected:</span> <span class="v">{{ status.connected }}</span></div>
+    <div><span class="k">Camera state:</span> <span class="v">{{ status.camera_state }}</span></div>
+    <div><span class="k">Telescope:</span> <span class="v">{{ status.telescope_url }}</span></div>
+    <div><span class="k">RA:</span> <span class="v">{{ status.telescope_ra_hours }}h</span></div>
+    <div><span class="k">Dec:</span> <span class="v">{{ status.telescope_dec_deg }}&deg;</span></div>
+    <div><span class="k">Pointing source:</span>
+      <span class="v">
+        {{ status.telescope_pointing_source }}
+        {% if status.telescope_pointing_source == "fallback" %}(telescope unreachable/disconnected){% endif %}
+      </span>
+    </div>
+  </div>
+</div>
+
+<form method="post">
+{% for section in sections %}
+  <div class="panel">
+    <h2>{{ section.title }}</h2>
+    {% if section.desc %}<p class="desc">{{ section.desc }}</p>{% endif %}
+    {% if section.id == "telescope" %}
+    <div class="discover-row">
+      <button type="button" class="btn secondary" id="discoverBtn">Discover telescopes on network</button>
+      <span class="desc" id="discoverStatus"></span>
+      <select id="discoverResults" style="display:none;"></select>
+      <button type="button" class="btn secondary" id="useDiscoveredBtn" style="display:none;">Use selected</button>
+    </div>
+    {% endif %}
+    <div class="field-grid">
+    {% for f in section.fields %}
+      {% if f.input_type == "checkbox" %}
+      <div class="field checkbox">
+        <input type="checkbox" id="{{ section.id }}_{{ f.name }}" name="{{ f.name }}" {% if f.value %}checked{% endif %}>
+        <label for="{{ section.id }}_{{ f.name }}">{{ f.label }}</label>
+      </div>
+      {% else %}
+      <div class="field">
+        <label for="{{ section.id }}_{{ f.name }}">{{ f.label }}</label>
+        <input type="{{ f.input_type }}" {% if f.step %}step="{{ f.step }}"{% endif %}
+               id="{{ section.id }}_{{ f.name }}" name="{{ f.name }}" value="{{ f.value }}">
+      </div>
+      {% endif %}
+    {% endfor %}
+    </div>
+  </div>
+{% endfor %}
+  <div class="actions">
+    <button type="submit">Save settings</button>
+  </div>
+</form>
+
+<script>
+document.getElementById('discoverBtn').addEventListener('click', async () => {
+  const status = document.getElementById('discoverStatus');
+  const select = document.getElementById('discoverResults');
+  const useBtn = document.getElementById('useDiscoveredBtn');
+  select.style.display = 'none';
+  useBtn.style.display = 'none';
+  select.innerHTML = '';
+  status.textContent = 'Scanning network (2s)...';
+  try {
+    const resp = await fetch('discover_telescopes');
+    const found = await resp.json();
+    if (found.length === 0) {
+      status.textContent = 'No Alpaca telescopes found on the network.';
+      return;
+    }
+    for (const t of found) {
+      const opt = document.createElement('option');
+      opt.value = JSON.stringify({base_url: t.base_url, device_number: t.device_number});
+      opt.textContent = t.label;
+      select.appendChild(opt);
+    }
+    status.textContent = 'Found ' + found.length + ' telescope(s):';
+    select.style.display = '';
+    useBtn.style.display = '';
+  } catch (e) {
+    status.textContent = 'Discovery failed: ' + e;
+  }
+});
+document.getElementById('useDiscoveredBtn').addEventListener('click', () => {
+  const select = document.getElementById('discoverResults');
+  if (!select.value) return;
+  const chosen = JSON.parse(select.value);
+  document.getElementById('telescope_alpaca_base_url').value = chosen.base_url;
+  document.getElementById('telescope_device_number').value = chosen.device_number;
+});
+</script>
+
+{% endblock %}

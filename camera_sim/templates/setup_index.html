@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="panel">
+  <h2>Configured devices</h2>
+  <p class="desc">{{ description }}</p>
+  <ul>
+  {% for device in devices %}
+    <li><a href="{{ device.setup_url }}">{{ device.name }}</a> &mdash; {{ device.device_type }} #{{ device.device_number }}</li>
+  {% endfor %}
+  </ul>
+</div>
+{% endblock %}

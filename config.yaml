@@ -1,0 +1,62 @@
+# Configuration for the ASCOM Alpaca camera simulator.
+
+server:
+  host: "0.0.0.0"
+  # 11111/11112 are already in use on this host by other Alpaca simulators
+  # (a mock telescope for testing, and an unrelated guide-sim project).
+  port: 11115
+  discovery_port: 32227
+  server_name: "Alpaca Camera Simulator"
+  manufacturer: "DIY"
+  manufacturer_version: "1.0"
+  location: "Simulated Observatory"
+
+telescope:
+  # Base URL of the Alpaca telescope device server to query for pointing.
+  alpaca_base_url: "http://192.168.0.56:11112"
+  device_number: 0
+  # Used if the telescope is unreachable/not connected, or doesn't expose FocalLength.
+  fallback_ra_hours: 6.75258
+  fallback_dec_deg: -16.7161
+  fallback_focal_length_mm: 800.0
+  use_telescope_focal_length: true
+  request_timeout_s: 2.0
+
+camera:
+  sensor_name: "Simulated CMOS 1920x1080"
+  sensor_type: "Monochrome"   # Monochrome | RGGB
+  pixel_size_um: 3.76
+  num_pixels_x: 1920
+  num_pixels_y: 1080
+  max_bin: 4
+  can_asymmetric_bin: true
+  can_fast_readout: true
+  can_pulse_guide: true
+  full_well_capacity_e: 20000.0
+  max_adu: 65535
+  read_noise_e: 2.5
+  dark_current_e_per_s_per_px: 0.01
+  bias_level_adu: 100
+  electrons_per_adu: 1.0
+  gain_min: 0
+  gain_max: 100
+  gain_default: 0
+  offset_min: 0
+  offset_max: 100
+  offset_default: 0
+  seeing_fwhm_arcsec: 2.5
+  # Electrons/second collected at the sensor for a mag-0 star through the full aperture.
+  zero_point_e_per_s_mag0: 5.0e7
+  rotation_deg: 0.0
+  flip_x: false
+  flip_y: false
+  exposure_min_s: 0.001
+  exposure_max_s: 3600.0
+  exposure_resolution_s: 0.001
+  ambient_temp_c: 20.0
+  max_cooldown_delta_c: 40.0
+  cooling_rate_c_per_s: 2.0
+
+catalog:
+  path: "data/tycho2_mag11_5.csv"
+  limit_mag: 11.5
