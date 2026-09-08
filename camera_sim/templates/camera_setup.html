@@ -24,6 +24,14 @@
         {% if status.telescope_pointing_source == "fallback" %}(telescope unreachable/disconnected){% endif %}
       </span>
     </div>
+    <div><span class="k">Focuser:</span> <span class="v">{{ status.focuser_url }}</span></div>
+    <div><span class="k">Defocus:</span> <span class="v">{{ status.focuser_defocus_um }}&micro;m</span></div>
+    <div><span class="k">Focus source:</span>
+      <span class="v">
+        {{ status.focuser_source }}
+        {% if status.focuser_source == "fallback" %}(focuser unreachable/disconnected - rendering in focus){% endif %}
+      </span>
+    </div>
   </div>
 </div>
 
@@ -32,26 +40,26 @@
   <div class="panel">
     <h2>{{ section.title }}</h2>
     {% if section.desc %}<p class="desc">{{ section.desc }}</p>{% endif %}
-    {% if section.id == "telescope" %}
-    <div class="discover-row">
-      <button type="button" class="btn secondary" id="discoverBtn">Discover telescopes on network</button>
-      <span class="desc" id="discoverStatus"></span>
-      <select id="discoverResults" style="display:none;"></select>
-      <button type="button" class="btn secondary" id="useDiscoveredBtn" style="display:none;">Use selected</button>
+    {% if section.id in ("telescope", "focuser") %}
+    <div class="discover-row" data-device-type="{{ section.id }}">
+      <button type="button" class="btn secondary discover-btn">Discover {{ section.id }}s on network</button>
+      <span class="desc discover-status"></span>
+      <select class="discover-results" style="display:none;"></select>
+      <button type="button" class="btn secondary use-discovered-btn" style="display:none;">Use selected</button>
     </div>
     {% endif %}
     <div class="field-grid">
     {% for f in section.fields %}
       {% if f.input_type == "checkbox" %}
       <div class="field checkbox">
-        <input type="checkbox" id="{{ section.id }}_{{ f.name }}" name="{{ f.name }}" {% if f.value %}checked{% endif %}>
+        <input type="checkbox" id="{{ section.id }}_{{ f.name }}" name="{{ section.id }}_{{ f.name }}" {% if f.value %}checked{% endif %}>
         <label for="{{ section.id }}_{{ f.name }}">{{ f.label }}</label>
       </div>
       {% else %}
       <div class="field">
         <label for="{{ section.id }}_{{ f.name }}">{{ f.label }}</label>
         <input type="{{ f.input_type }}" {% if f.step %}step="{{ f.step }}"{% endif %}
-               id="{{ section.id }}_{{ f.name }}" name="{{ f.name }}" value="{{ f.value }}">
+               id="{{ section.id }}_{{ f.name }}" name="{{ section.id }}_{{ f.name }}" value="{{ f.value }}">
       </div>
       {% endif %}
     {% endfor %}
@@ -64,40 +72,45 @@
 </form>
 
 <script>
-document.getElementById('discoverBtn').addEventListener('click', async () => {
-  const status = document.getElementById('discoverStatus');
-  const select = document.getElementById('discoverResults');
-  const useBtn = document.getElementById('useDiscoveredBtn');
-  select.style.display = 'none';
-  useBtn.style.display = 'none';
-  select.innerHTML = '';
-  status.textContent = 'Scanning network (2s)...';
-  try {
-    const resp = await fetch('discover_telescopes');
-    const found = await resp.json();
-    if (found.length === 0) {
-      status.textContent = 'No Alpaca telescopes found on the network.';
-      return;
+document.querySelectorAll('.discover-row').forEach((row) => {
+  const deviceType = row.dataset.deviceType;
+  const btn = row.querySelector('.discover-btn');
+  const status = row.querySelector('.discover-status');
+  const select = row.querySelector('.discover-results');
+  const useBtn = row.querySelector('.use-discovered-btn');
+
+  btn.addEventListener('click', async () => {
+    select.style.display = 'none';
+    useBtn.style.display = 'none';
+    select.innerHTML = '';
+    status.textContent = 'Scanning network (2s)...';
+    try {
+      const resp = await fetch('discover_' + deviceType + 's');
+      const found = await resp.json();
+      if (found.length === 0) {
+        status.textContent = 'No Alpaca ' + deviceType + 's found on the network.';
+        return;
+      }
+      for (const d of found) {
+        const opt = document.createElement('option');
+        opt.value = JSON.stringify({base_url: d.base_url, device_number: d.device_number});
+        opt.textContent = d.label;
+        select.appendChild(opt);
+      }
+      status.textContent = 'Found ' + found.length + ' ' + deviceType + '(s):';
+      select.style.display = '';
+      useBtn.style.display = '';
+    } catch (e) {
+      status.textContent = 'Discovery failed: ' + e;
     }
-    for (const t of found) {
-      const opt = document.createElement('option');
-      opt.value = JSON.stringify({base_url: t.base_url, device_number: t.device_number});
-      opt.textContent = t.label;
-      select.appendChild(opt);
-    }
-    status.textContent = 'Found ' + found.length + ' telescope(s):';
-    select.style.display = '';
-    useBtn.style.display = '';
-  } catch (e) {
-    status.textContent = 'Discovery failed: ' + e;
-  }
-});
-document.getElementById('useDiscoveredBtn').addEventListener('click', () => {
-  const select = document.getElementById('discoverResults');
-  if (!select.value) return;
-  const chosen = JSON.parse(select.value);
-  document.getElementById('telescope_alpaca_base_url').value = chosen.base_url;
-  document.getElementById('telescope_device_number').value = chosen.device_number;
+  });
+
+  useBtn.addEventListener('click', () => {
+    if (!select.value) return;
+    const chosen = JSON.parse(select.value);
+    document.getElementById(deviceType + '_alpaca_base_url').value = chosen.base_url;
+    document.getElementById(deviceType + '_device_number').value = chosen.device_number;
+  });
 });
 </script>
 

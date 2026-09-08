@@ -1,8 +1,8 @@
 """Client side of the Alpaca UDP discovery protocol: broadcasts an
 "alpacadiscovery1" probe, collects replies from any Alpaca device servers on
-the network, then queries each one's Management API for Telescope devices.
-Used by the web setup UI's "Discover telescopes" button so a user can pick
-an existing Alpaca telescope driver instead of typing its URL by hand.
+the network, then queries each one's Management API for devices of a given
+type. Used by the web setup UI's "Discover telescopes/focusers" buttons so a
+user can pick an existing Alpaca driver instead of typing its URL by hand.
 """
 from __future__ import annotations
 
@@ -21,6 +21,23 @@ DISCOVERY_MESSAGE = b"alpacadiscovery1"
 
 @dataclass
 class DiscoveredTelescope:
+    host: str
+    port: int
+    device_number: int
+    device_name: str
+    unique_id: str
+
+    @property
+    def base_url(self) -> str:
+        return f"http://{self.host}:{self.port}"
+
+    @property
+    def label(self) -> str:
+        return f"{self.device_name} ({self.host}:{self.port}, dev #{self.device_number})"
+
+
+@dataclass
+class DiscoveredFocuser:
     host: str
     port: int
     device_number: int
@@ -80,7 +97,7 @@ async def _broadcast_for_alpaca_servers(discovery_port: int, timeout_s: float) -
     return responders
 
 
-async def _telescopes_from_server(client: httpx.AsyncClient, host: str, port: int) -> list[DiscoveredTelescope]:
+async def _devices_of_type(client: httpx.AsyncClient, host: str, port: int, device_type: str) -> list[dict]:
     try:
         resp = await client.get(f"http://{host}:{port}/management/v1/configureddevices")
         resp.raise_for_status()
@@ -88,6 +105,10 @@ async def _telescopes_from_server(client: httpx.AsyncClient, host: str, port: in
     except Exception as exc:  # noqa: BLE001
         logger.debug("management query to %s:%d failed: %s", host, port, exc)
         return []
+    return [d for d in devices if d.get("DeviceType") == device_type]
+
+
+async def _telescopes_from_server(client: httpx.AsyncClient, host: str, port: int) -> list[DiscoveredTelescope]:
     return [
         DiscoveredTelescope(
             host=host,
@@ -96,9 +117,34 @@ async def _telescopes_from_server(client: httpx.AsyncClient, host: str, port: in
             device_name=d.get("DeviceName", "Telescope"),
             unique_id=d.get("UniqueID", ""),
         )
-        for d in devices
-        if d.get("DeviceType") == "Telescope"
+        for d in await _devices_of_type(client, host, port, "Telescope")
     ]
+
+
+async def _focusers_from_server(client: httpx.AsyncClient, host: str, port: int) -> list[DiscoveredFocuser]:
+    return [
+        DiscoveredFocuser(
+            host=host,
+            port=port,
+            device_number=d.get("DeviceNumber", 0),
+            device_name=d.get("DeviceName", "Focuser"),
+            unique_id=d.get("UniqueID", ""),
+        )
+        for d in await _devices_of_type(client, host, port, "Focuser")
+    ]
+
+
+def _dedupe(found: list) -> list:
+    # A multi-homed host (multiple network interfaces) answers a broadcast
+    # probe once per interface, so the same physical device can otherwise
+    # show up more than once under different IPs. Collapse those by the
+    # device's own UniqueID (falling back to host/port/device_number for
+    # drivers that don't set one) so the picker shows one entry per device.
+    deduped: dict[str, object] = {}
+    for item in found:
+        key = item.unique_id or f"{item.host}:{item.port}:{item.device_number}"
+        deduped.setdefault(key, item)
+    return list(deduped.values())
 
 
 async def discover_telescopes(discovery_port: int = 32227, timeout_s: float = 2.0) -> list[DiscoveredTelescope]:
@@ -109,15 +155,15 @@ async def discover_telescopes(discovery_port: int = 32227, timeout_s: float = 2.
         results = await asyncio.gather(
             *(_telescopes_from_server(client, host, port) for host, port in responders)
         )
-    found = [t for group in results for t in group]
+    return _dedupe([t for group in results for t in group])
 
-    # A multi-homed host (multiple network interfaces) answers a broadcast
-    # probe once per interface, so the same physical device can otherwise
-    # show up more than once under different IPs. Collapse those by the
-    # device's own UniqueID (falling back to host/port/device_number for
-    # drivers that don't set one) so the picker shows one entry per device.
-    deduped: dict[str, DiscoveredTelescope] = {}
-    for t in found:
-        key = t.unique_id or f"{t.host}:{t.port}:{t.device_number}"
-        deduped.setdefault(key, t)
-    return list(deduped.values())
+
+async def discover_focusers(discovery_port: int = 32227, timeout_s: float = 2.0) -> list[DiscoveredFocuser]:
+    responders = await _broadcast_for_alpaca_servers(discovery_port, timeout_s)
+    if not responders:
+        return []
+    async with httpx.AsyncClient(timeout=2.0) as client:
+        results = await asyncio.gather(
+            *(_focusers_from_server(client, host, port) for host, port in responders)
+        )
+    return _dedupe([f for group in results for f in group])

@@ -53,8 +53,18 @@ def describe_fields(model: BaseModel) -> list[FormField]:
     return fields
 
 
-def parse_form_to_model(model_cls: type[BaseModel], form: dict[str, str]) -> tuple[BaseModel | None, list[str]]:
+def parse_form_to_model(
+    model_cls: type[BaseModel], form: dict[str, str], prefix: str
+) -> tuple[BaseModel | None, list[str]]:
     """Builds a validated instance of model_cls from submitted form data.
+
+    `prefix` must match the section id used to render this model's fields
+    (see camera_setup.html, which names each input "{section.id}_{field}") -
+    all sections share one flat form/POST, and several config models
+    legitimately have same-named fields (e.g. both TelescopeConfig and
+    FocuserConfig have `device_number`), so the prefix is what keeps them
+    from colliding.
+
     Bool fields are treated as HTML checkboxes: an unchecked checkbox simply
     isn't submitted by the browser, so its absence means False. Every other
     field is parsed from its submitted string value.
@@ -62,13 +72,14 @@ def parse_form_to_model(model_cls: type[BaseModel], form: dict[str, str]) -> tup
     values: dict[str, Any] = {}
     errors: list[str] = []
     for name, info in model_cls.model_fields.items():
+        key = f"{prefix}_{name}"
         annotation = info.annotation
         if annotation is bool:
-            values[name] = form.get(name) in ("on", "true", "1", "True")
+            values[name] = form.get(key) in ("on", "true", "1", "True")
             continue
-        if name not in form:
+        if key not in form:
             continue
-        raw = form[name]
+        raw = form[key]
         try:
             if annotation is int:
                 values[name] = int(raw)

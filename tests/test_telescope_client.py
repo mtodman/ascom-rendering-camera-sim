@@ -11,14 +11,16 @@ import pytest
 from camera_sim.config import TelescopeConfig
 from camera_sim.telescope_client import TelescopeClient
 
-# A real, spec-compliant Alpaca telescope reports FocalLength in *meters*
-# (per the ASCOM ITelescope interface) - 0.4 here represents an actual
-# 400mm scope, the exact case that exposed the bug.
+# A real, spec-compliant Alpaca telescope reports FocalLength and
+# ApertureDiameter in *meters* (per the ASCOM ITelescope interface) - 0.4
+# here represents an actual 400mm scope (the exact case that exposed the
+# original FocalLength bug), and 0.2 an actual 200mm aperture.
 FAKE_TELESCOPE_STATE = {
     "connected": True,
     "rightascension": 5.5,
     "declination": 12.3,
     "focallength": 0.4,
+    "aperturediameter": 0.2,
 }
 
 
@@ -58,6 +60,7 @@ def test_focal_length_converted_from_meters_to_mm(fake_telescope_server):
         alpaca_base_url=f"http://127.0.0.1:{fake_telescope_server}",
         device_number=0,
         use_telescope_focal_length=True,
+        use_telescope_aperture=True,
     )
     client = TelescopeClient(cfg)
     pointing = client.get_pointing()
@@ -67,3 +70,24 @@ def test_focal_length_converted_from_meters_to_mm(fake_telescope_server):
     assert pointing.dec_deg == 12.3
     # 0.4m reported by the telescope must become 400mm, not be taken as 0.4mm.
     assert pointing.focal_length_mm == 400.0
+    # Same meters -> mm conversion applies to ApertureDiameter.
+    assert pointing.aperture_diameter_mm == 200.0
+
+
+def test_fallback_used_when_telescope_unreachable():
+    cfg = TelescopeConfig(
+        alpaca_base_url="http://127.0.0.1:1",  # nothing listens here
+        fallback_ra_hours=1.0,
+        fallback_dec_deg=2.0,
+        fallback_focal_length_mm=555.0,
+        fallback_aperture_diameter_mm=111.0,
+        request_timeout_s=0.5,
+    )
+    client = TelescopeClient(cfg)
+    pointing = client.get_pointing()
+
+    assert pointing.source == "fallback"
+    assert pointing.ra_hours == 1.0
+    assert pointing.dec_deg == 2.0
+    assert pointing.focal_length_mm == 555.0
+    assert pointing.aperture_diameter_mm == 111.0

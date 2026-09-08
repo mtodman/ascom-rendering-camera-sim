@@ -15,11 +15,28 @@ telescope:
   # Base URL of the Alpaca telescope device server to query for pointing.
   alpaca_base_url: "http://192.168.0.56:11112"
   device_number: 0
-  # Used if the telescope is unreachable/not connected, or doesn't expose FocalLength.
+  # Used if the telescope is unreachable/not connected, or doesn't expose FocalLength/ApertureDiameter.
   fallback_ra_hours: 6.75258
   fallback_dec_deg: -16.7161
   fallback_focal_length_mm: 800.0
+  fallback_aperture_diameter_mm: 200.0
   use_telescope_focal_length: true
+  use_telescope_aperture: true
+  request_timeout_s: 2.0
+
+focuser:
+  # Base URL of the Alpaca focuser device server to query for focus position,
+  # to simulate defocus. Leave unreachable/unconfigured to always render in focus.
+  alpaca_base_url: "http://localhost:11114"
+  device_number: 0
+  # Focuser step position that represents perfect focus for this setup - Alpaca's
+  # Position property is just a raw step count with no defined zero, so this has
+  # to be set explicitly (e.g. via the web setup page) to match wherever "in
+  # focus" actually is.
+  in_focus_position: 0
+  # Used if the focuser doesn't expose StepSize.
+  fallback_step_size_um: 5.0
+  use_focuser_step_size: true
   request_timeout_s: 2.0
 
 camera:

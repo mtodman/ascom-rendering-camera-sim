@@ -7,7 +7,27 @@ from __future__ import annotations
 import numpy as np
 
 from .config import CameraConfig
-from .sky_model import ProjectedStars, plate_scale_arcsec_per_px
+from .sky_model import ARCSEC_PER_RAD, ProjectedStars, plate_scale_arcsec_per_px
+
+
+def defocus_blur_fwhm_arcsec(defocus_um: float, aperture_diameter_mm: float, focal_length_mm: float) -> float:
+    """Geometric-optics defocus blur size, treated as an equivalent-FWHM
+    contribution to be combined in quadrature with atmospheric seeing.
+
+    A defocus distance at the focal plane produces a blur circle whose
+    diameter is (defocus / focal_ratio); converting that physical size to
+    an angular one uses the same small-angle relation as the plate scale.
+    A real defocused star's PSF is closer to a disk (or an annulus, with a
+    central obstruction) than a Gaussian, but approximating its width as an
+    equivalent FWHM is a standard simplification here - it gives a smooth,
+    monotonic FWHM-vs-focuser-position curve, which is what autofocus
+    routines actually need to converge on.
+    """
+    if aperture_diameter_mm <= 0 or focal_length_mm <= 0:
+        return 0.0
+    defocus_mm = abs(defocus_um) / 1000.0
+    blur_diameter_mm = defocus_mm * aperture_diameter_mm / focal_length_mm
+    return blur_diameter_mm * ARCSEC_PER_RAD / focal_length_mm
 
 
 def _splat_gaussian(image: np.ndarray, x0: float, y0: float, flux: float, sigma_px: float) -> None:
@@ -38,6 +58,8 @@ def render_frame(
     light: bool,
     gain: int,
     focal_length_mm: float,
+    aperture_diameter_mm: float,
+    defocus_um: float,
     ccd_temperature_c: float,
     rng: np.random.Generator,
 ) -> np.ndarray:
@@ -48,7 +70,9 @@ def render_frame(
 
     if light and exposure_s > 0 and len(stars.vmag) > 0:
         scale = plate_scale_arcsec_per_px(cam.pixel_size_um, focal_length_mm)
-        sigma_px = max(0.35, (cam.seeing_fwhm_arcsec / 2.3548) / scale)
+        defocus_fwhm = defocus_blur_fwhm_arcsec(defocus_um, aperture_diameter_mm, focal_length_mm)
+        total_fwhm = float(np.hypot(cam.seeing_fwhm_arcsec, defocus_fwhm))
+        sigma_px = max(0.35, (total_fwhm / 2.3548) / scale)
         # Gain reduces effective zero point slightly to give a simple, monotonic
         # brightness/gain relationship without a separate photometric gain curve.
         gain_factor = 1.0 + (gain / max(1, cam.gain_max)) * 0.5

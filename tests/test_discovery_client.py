@@ -10,12 +10,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 
-from camera_sim.discovery_client import discover_telescopes
+from camera_sim.discovery_client import discover_focusers, discover_telescopes
 
 FAKE_DEVICES_BODY = {
     "Value": [
         {"DeviceName": "Fake Camera", "DeviceType": "Camera", "DeviceNumber": 0, "UniqueID": "cam-1"},
         {"DeviceName": "Fake Mount", "DeviceType": "Telescope", "DeviceNumber": 0, "UniqueID": "tel-1"},
+        {"DeviceName": "Fake Focuser", "DeviceType": "Focuser", "DeviceNumber": 0, "UniqueID": "foc-1"},
     ]
 }
 
@@ -124,6 +125,24 @@ async def test_discover_telescopes_no_responders_returns_empty():
 
 
 @pytest.mark.asyncio
+async def test_discover_focusers_finds_fake_device(fake_alpaca_device):
+    found = await discover_focusers(
+        discovery_port=fake_alpaca_device["discovery_port"], timeout_s=0.8
+    )
+    assert len(found) == 1
+    focuser = found[0]
+    assert focuser.device_name == "Fake Focuser"
+    assert focuser.port == fake_alpaca_device["http_port"]
+    assert focuser.base_url == f"http://127.0.0.1:{fake_alpaca_device['http_port']}"
+
+
+@pytest.mark.asyncio
+async def test_discover_focusers_no_responders_returns_empty():
+    found = await discover_focusers(discovery_port=_free_udp_port(), timeout_s=0.3)
+    assert found == []
+
+
+@pytest.mark.asyncio
 async def test_discover_telescopes_dedupes_multihomed_responses(monkeypatch):
     """A multi-homed host answers a broadcast once per interface, so the same
     device can be seen from two different (host, port) pairs. Both should
@@ -149,3 +168,27 @@ async def test_discover_telescopes_dedupes_multihomed_responses(monkeypatch):
     found = await discover_telescopes(discovery_port=1234, timeout_s=0.01)
     assert len(found) == 1
     assert found[0].unique_id == "abc-123"
+
+
+@pytest.mark.asyncio
+async def test_discover_focusers_dedupes_multihomed_responses(monkeypatch):
+    from camera_sim import discovery_client
+    from camera_sim.discovery_client import DiscoveredFocuser
+
+    same_device_twice = [
+        DiscoveredFocuser(host="192.168.0.106", port=11114, device_number=0, device_name="Focuser", unique_id="xyz-789"),
+        DiscoveredFocuser(host="192.168.0.122", port=11114, device_number=0, device_name="Focuser", unique_id="xyz-789"),
+    ]
+
+    async def fake_broadcast(discovery_port, timeout_s):
+        return {("192.168.0.106", 11114), ("192.168.0.122", 11114)}
+
+    async def fake_query(client, host, port):
+        return [f for f in same_device_twice if f.host == host]
+
+    monkeypatch.setattr(discovery_client, "_broadcast_for_alpaca_servers", fake_broadcast)
+    monkeypatch.setattr(discovery_client, "_focusers_from_server", fake_query)
+
+    found = await discover_focusers(discovery_port=1234, timeout_s=0.01)
+    assert len(found) == 1
+    assert found[0].unique_id == "xyz-789"

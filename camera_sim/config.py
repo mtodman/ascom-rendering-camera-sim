@@ -35,7 +35,22 @@ class TelescopeConfig(BaseModel):
     fallback_ra_hours: float = 0.0
     fallback_dec_deg: float = 90.0
     fallback_focal_length_mm: float = 800.0
+    fallback_aperture_diameter_mm: float = 200.0
     use_telescope_focal_length: bool = True
+    use_telescope_aperture: bool = True
+    request_timeout_s: float = 2.0
+
+
+class FocuserConfig(BaseModel):
+    alpaca_base_url: str = "http://localhost:11114"
+    device_number: int = 0
+    # Focuser step position representing perfect focus - Alpaca's Position
+    # property is just a raw step count with no defined zero, so this has
+    # to be set explicitly (e.g. via the web setup page) to match wherever
+    # "in focus" actually is for a given setup.
+    in_focus_position: int = 0
+    fallback_step_size_um: float = 5.0
+    use_focuser_step_size: bool = True
     request_timeout_s: float = 2.0
 
 
@@ -82,6 +97,7 @@ class CatalogConfig(BaseModel):
 class Settings(BaseModel):
     server: ServerConfig = ServerConfig()
     telescope: TelescopeConfig = TelescopeConfig()
+    focuser: FocuserConfig = FocuserConfig()
     camera: CameraConfig = CameraConfig()
     catalog: CatalogConfig = CatalogConfig()
 

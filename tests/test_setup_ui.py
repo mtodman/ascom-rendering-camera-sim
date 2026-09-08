@@ -59,7 +59,7 @@ def test_setup_post_applies_live_and_persists(tmp_path):
     device = app.state.device
 
     form = _full_form(settings)
-    form["seeing_fwhm_arcsec"] = "4.4"
+    form["camera_seeing_fwhm_arcsec"] = "4.4"
 
     with TestClient(app) as client:
         r = client.post("/setup/v1/camera/0/setup", data=form)
@@ -79,7 +79,7 @@ def test_setup_post_rejects_invalid_value(tmp_path):
     app = create_app(settings, config_path=config_path)
 
     form = _full_form(settings)
-    form["num_pixels_x"] = ""  # simulates a cleared/invalid number input
+    form["camera_num_pixels_x"] = ""  # simulates a cleared/invalid number input
 
     with TestClient(app) as client:
         r = client.post("/setup/v1/camera/0/setup", data=form)
@@ -90,6 +90,28 @@ def test_setup_post_rejects_invalid_value(tmp_path):
     assert settings.camera.num_pixels_x == 200  # unchanged
 
 
+def test_setup_post_telescope_and_focuser_device_number_dont_collide(tmp_path):
+    """TelescopeConfig and FocuserConfig both have a `device_number` field;
+    the form must keep them distinct (prefixed by section id) rather than
+    both reading the same POSTed value.
+    """
+    config_path = tmp_path / "config.yaml"
+    settings = make_settings(tmp_path / "cat.csv")
+    app = create_app(settings, config_path=config_path)
+
+    form = _full_form(settings)
+    form["telescope_device_number"] = "3"
+    form["focuser_device_number"] = "7"
+
+    with TestClient(app) as client:
+        r = client.post("/setup/v1/camera/0/setup", data=form)
+        assert r.status_code == 200
+        assert "Settings saved" in r.text
+
+    assert settings.telescope.device_number == 3
+    assert settings.focuser.device_number == 7
+
+
 def test_setup_post_bad_catalog_path_leaves_settings_unchanged(tmp_path):
     config_path = tmp_path / "config.yaml"
     settings = make_settings(tmp_path / "cat.csv")
@@ -98,7 +120,7 @@ def test_setup_post_bad_catalog_path_leaves_settings_unchanged(tmp_path):
     original_catalog = device.catalog
 
     form = _full_form(settings)
-    form["path"] = str(tmp_path / "does_not_exist.csv")
+    form["catalog_path"] = str(tmp_path / "does_not_exist.csv")
 
     with TestClient(app) as client:
         r = client.post("/setup/v1/camera/0/setup", data=form)
@@ -113,16 +135,27 @@ def test_setup_post_bad_catalog_path_leaves_settings_unchanged(tmp_path):
 
 
 def _full_form(settings: Settings) -> dict:
-    """Builds a complete form submission (every field from every section)
-    from the settings' current values, the way the real HTML form would.
+    """Builds a complete form submission (every field from every section,
+    prefixed by section id) from the settings' current values, the way the
+    real HTML form would (see camera_setup.html's "{section.id}_{field}"
+    naming - required since e.g. TelescopeConfig and FocuserConfig share
+    field names like `device_number`).
     """
     form: dict[str, str] = {}
-    for model in (settings.server, settings.telescope, settings.camera, settings.catalog):
+    sections = {
+        "server": settings.server,
+        "telescope": settings.telescope,
+        "focuser": settings.focuser,
+        "camera": settings.camera,
+        "catalog": settings.catalog,
+    }
+    for prefix, model in sections.items():
         for name, info in type(model).model_fields.items():
             value = getattr(model, name)
+            key = f"{prefix}_{name}"
             if info.annotation is bool:
                 if value:
-                    form[name] = "on"
+                    form[key] = "on"
             else:
-                form[name] = str(value)
+                form[key] = str(value)
     return form

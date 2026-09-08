@@ -15,8 +15,17 @@ from fastapi.templating import Jinja2Templates
 from ruamel.yaml.comments import CommentedMap
 
 from .camera import CameraDevice
-from .config import REPO_ROOT, CameraConfig, CatalogConfig, ServerConfig, Settings, TelescopeConfig, update_model_in_place
-from .discovery_client import discover_telescopes
+from .config import (
+    REPO_ROOT,
+    CameraConfig,
+    CatalogConfig,
+    FocuserConfig,
+    ServerConfig,
+    Settings,
+    TelescopeConfig,
+    update_model_in_place,
+)
+from .discovery_client import discover_focusers, discover_telescopes
 from .form_utils import describe_fields, parse_form_to_model
 from .sky_model import StarCatalog
 
@@ -29,7 +38,13 @@ def build_setup_router(
 ) -> APIRouter:
     router = APIRouter()
 
-    def _sections(cfg_server: ServerConfig, cfg_tel: TelescopeConfig, cfg_cam: CameraConfig, cfg_cat: CatalogConfig):
+    def _sections(
+        cfg_server: ServerConfig,
+        cfg_tel: TelescopeConfig,
+        cfg_foc: FocuserConfig,
+        cfg_cam: CameraConfig,
+        cfg_cat: CatalogConfig,
+    ):
         return [
             {
                 "id": "server",
@@ -42,6 +57,14 @@ def build_setup_router(
                 "title": "Telescope",
                 "desc": "Where to query for pointing, and fallback values used if it's unreachable.",
                 "fields": describe_fields(cfg_tel),
+            },
+            {
+                "id": "focuser",
+                "title": "Focuser",
+                "desc": "Where to query for focus position, to simulate defocus. "
+                "Set \"In Focus Position\" to whatever step position is perfectly focused "
+                "for your setup - leave the focuser unconfigured/unreachable to always render in focus.",
+                "fields": describe_fields(cfg_foc),
             },
             {
                 "id": "camera",
@@ -59,6 +82,7 @@ def build_setup_router(
 
     async def _status() -> dict:
         pointing = await asyncio.to_thread(device.telescope.get_pointing)
+        defocus_um, focuser_source = await asyncio.to_thread(device.focuser.get_defocus_um)
         return {
             "connected": device.common.connected,
             "camera_state": device.camera_state.name,
@@ -66,6 +90,9 @@ def build_setup_router(
             "telescope_ra_hours": round(pointing.ra_hours, 4),
             "telescope_dec_deg": round(pointing.dec_deg, 4),
             "telescope_pointing_source": pointing.source,
+            "focuser_url": f"{settings.focuser.alpaca_base_url}/api/v1/focuser/{settings.focuser.device_number}",
+            "focuser_defocus_um": round(defocus_um, 1),
+            "focuser_source": focuser_source,
         }
 
     @router.get("/")
@@ -105,6 +132,20 @@ def build_setup_router(
             ]
         )
 
+    @router.get("/setup/v1/camera/{device_number}/discover_focusers")
+    async def discover_focusers_endpoint(device_number: int):
+        found = await discover_focusers(settings.server.discovery_port)
+        return JSONResponse(
+            [
+                {
+                    "base_url": f.base_url,
+                    "device_number": f.device_number,
+                    "label": f.label,
+                }
+                for f in found
+            ]
+        )
+
     @router.get("/setup/v1/camera/{device_number}/setup")
     async def camera_setup_get(request: Request, device_number: int):
         return templates.TemplateResponse(
@@ -113,7 +154,9 @@ def build_setup_router(
             {
                 "server_name": settings.server.server_name,
                 "status": await _status(),
-                "sections": _sections(settings.server, settings.telescope, settings.camera, settings.catalog),
+                "sections": _sections(
+                    settings.server, settings.telescope, settings.focuser, settings.camera, settings.catalog
+                ),
                 "saved": False,
                 "errors": [],
                 "restart_needed": False,
@@ -124,11 +167,12 @@ def build_setup_router(
     async def camera_setup_post(request: Request, device_number: int):
         form = dict((await request.form()).multi_items())
 
-        new_server, server_errors = parse_form_to_model(ServerConfig, form)
-        new_telescope, telescope_errors = parse_form_to_model(TelescopeConfig, form)
-        new_camera, camera_errors = parse_form_to_model(CameraConfig, form)
-        new_catalog, catalog_errors = parse_form_to_model(CatalogConfig, form)
-        errors = server_errors + telescope_errors + camera_errors + catalog_errors
+        new_server, server_errors = parse_form_to_model(ServerConfig, form, "server")
+        new_telescope, telescope_errors = parse_form_to_model(TelescopeConfig, form, "telescope")
+        new_focuser, focuser_errors = parse_form_to_model(FocuserConfig, form, "focuser")
+        new_camera, camera_errors = parse_form_to_model(CameraConfig, form, "camera")
+        new_catalog, catalog_errors = parse_form_to_model(CatalogConfig, form, "catalog")
+        errors = server_errors + telescope_errors + focuser_errors + camera_errors + catalog_errors
         server_changed = False
 
         new_catalog_obj = None
@@ -151,6 +195,7 @@ def build_setup_router(
         if not errors:
             update_model_in_place(settings.server, new_server)
             update_model_in_place(settings.telescope, new_telescope)
+            update_model_in_place(settings.focuser, new_focuser)
             update_model_in_place(settings.camera, new_camera)
             update_model_in_place(settings.catalog, new_catalog)
             if new_catalog_obj is not None:
@@ -163,7 +208,9 @@ def build_setup_router(
             {
                 "server_name": settings.server.server_name,
                 "status": await _status(),
-                "sections": _sections(settings.server, settings.telescope, settings.camera, settings.catalog),
+                "sections": _sections(
+                    settings.server, settings.telescope, settings.focuser, settings.camera, settings.catalog
+                ),
                 "saved": not errors,
                 "errors": errors,
                 "restart_needed": not errors and server_changed,

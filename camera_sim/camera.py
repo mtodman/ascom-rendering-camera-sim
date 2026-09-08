@@ -28,7 +28,8 @@ from .alpaca_errors import (
     NotConnectedException,
     NotImplementedException,
 )
-from .config import CameraConfig, TelescopeConfig
+from .config import CameraConfig, FocuserConfig, TelescopeConfig
+from .focuser_client import FocuserClient
 from .sky_model import StarCatalog, project_stars
 from .telescope_client import TelescopeClient
 
@@ -45,10 +46,11 @@ class CameraState(enum.IntEnum):
 
 
 class CameraDevice:
-    def __init__(self, cam_cfg: CameraConfig, tel_cfg: TelescopeConfig, catalog: StarCatalog):
+    def __init__(self, cam_cfg: CameraConfig, tel_cfg: TelescopeConfig, foc_cfg: FocuserConfig, catalog: StarCatalog):
         self.cfg = cam_cfg
         self.catalog = catalog
         self.telescope = TelescopeClient(tel_cfg)
+        self.focuser = FocuserClient(foc_cfg)
         self.rng = np.random.default_rng()
 
         self.common = CommonDeviceState(
@@ -160,6 +162,7 @@ class CameraDevice:
             self.camera_state = CameraState.READING
 
             pointing = await asyncio.to_thread(self.telescope.get_pointing)
+            defocus_um, focuser_source = await asyncio.to_thread(self.focuser.get_defocus_um)
             center_ra_deg = pointing.ra_hours * 15.0
 
             if light:
@@ -188,6 +191,8 @@ class CameraDevice:
                 light,
                 self.gain,
                 pointing.focal_length_mm,
+                pointing.aperture_diameter_mm,
+                defocus_um,
                 self.ccd_temperature,
                 self.rng,
             )
@@ -201,8 +206,10 @@ class CameraDevice:
             self.camera_state = CameraState.IDLE
             self.image_ready = True
             logger.info(
-                "exposure done: %.3fs light=%s pointing=(%.4fh,%.4f deg,%s) stars_in_frame=%d",
+                "exposure done: %.3fs light=%s pointing=(%.4fh,%.4f deg,%s) stars_in_frame=%d "
+                "defocus=%.1fum(%s)",
                 duration_s, light, pointing.ra_hours, pointing.dec_deg, pointing.source, len(stars.vmag),
+                defocus_um, focuser_source,
             )
         except asyncio.CancelledError:
             self.camera_state = CameraState.IDLE

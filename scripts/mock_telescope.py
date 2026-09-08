@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """A minimal Alpaca telescope device server for testing the camera simulator
 without real hardware. Exposes just enough of ITelescope for the camera sim's
-telescope_client to work: Connected, RightAscension, Declination, FocalLength.
+telescope_client to work: Connected, RightAscension, Declination, FocalLength,
+ApertureDiameter.
 
 Also exposes PUT /api/v1/telescope/0/slewtocoordinates (Alpaca-standard) so
 you can point it, plus a convenience PUT /debug/pointing for quick testing.
 
 Usage:
     python3 scripts/mock_telescope.py --host 0.0.0.0 --port 11111 \
-        --ra 5.5877 --dec -5.3911 --focal-length 800
+        --ra 5.5877 --dec -5.3911 --focal-length 800 --aperture 200
     (defaults point near Orion's Belt / M42 region)
 """
 import argparse
@@ -25,6 +26,7 @@ state = {
     "ra_hours": 5.5877,
     "dec_deg": -5.3911,
     "focal_length_mm": 800.0,
+    "aperture_diameter_mm": 200.0,
 }
 
 _txn_counter = itertools.count(1)
@@ -80,6 +82,12 @@ async def get_focal_length(request: Request):
     return _ok(state["focal_length_mm"] / 1000.0, dict(request.query_params))
 
 
+@app.get("/api/v1/telescope/0/aperturediameter")
+async def get_aperture_diameter(request: Request):
+    # Same meters-vs-millimeters convention as FocalLength.
+    return _ok(state["aperture_diameter_mm"] / 1000.0, dict(request.query_params))
+
+
 @app.put("/debug/pointing")
 async def set_pointing(request: Request):
     """Convenience endpoint (not part of Alpaca spec) for testing:
@@ -92,6 +100,8 @@ async def set_pointing(request: Request):
         state["dec_deg"] = float(params["dec_deg"])
     if "focal_length_mm" in params:
         state["focal_length_mm"] = float(params["focal_length_mm"])
+    if "aperture_diameter_mm" in params:
+        state["aperture_diameter_mm"] = float(params["aperture_diameter_mm"])
     return JSONResponse(state)
 
 
@@ -102,8 +112,10 @@ if __name__ == "__main__":
     ap.add_argument("--ra", type=float, default=5.5877, help="RA in hours")
     ap.add_argument("--dec", type=float, default=-5.3911, help="Dec in degrees")
     ap.add_argument("--focal-length", type=float, default=800.0, help="Focal length in mm")
+    ap.add_argument("--aperture", type=float, default=200.0, help="Aperture diameter in mm")
     args = ap.parse_args()
     state["ra_hours"] = args.ra
     state["dec_deg"] = args.dec
     state["focal_length_mm"] = args.focal_length
+    state["aperture_diameter_mm"] = args.aperture
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
