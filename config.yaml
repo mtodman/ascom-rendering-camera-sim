@@ -27,16 +27,40 @@ telescope:
 focuser:
   # Base URL of the Alpaca focuser device server to query for focus position,
   # to simulate defocus. Leave unreachable/unconfigured to always render in focus.
-  alpaca_base_url: "http://localhost:11114"
+  alpaca_base_url: "http://192.168.0.56:32323"
   device_number: 0
   # Focuser step position that represents perfect focus for this setup - Alpaca's
   # Position property is just a raw step count with no defined zero, so this has
   # to be set explicitly (e.g. via the web setup page) to match wherever "in
   # focus" actually is.
-  in_focus_position: 0
+  in_focus_position: 25480
   # Used if the focuser doesn't expose StepSize.
   fallback_step_size_um: 5.0
   use_focuser_step_size: true
+  request_timeout_s: 2.0
+
+filter_wheel:
+  # Base URL of the Alpaca filter wheel device server to query for filter
+  # position. Each filter's own FocusOffsets value (read from the device) is
+  # added to the focuser's defocus, so a non-parfocal filter set shifts focus
+  # repeatably by filter. Leave unreachable/unconfigured for no effect
+  # (offset always 0).
+  alpaca_base_url: "http://localhost:11117"
+  device_number: 0
+  request_timeout_s: 2.0
+
+cover_calibrator:
+  # Base URL of the Alpaca cover/calibrator device server to query for cover
+  # state and calibrator brightness. Leave unreachable/unconfigured for no
+  # effect (cover always treated as open, calibrator off).
+  alpaca_base_url: "http://localhost:11116"
+  device_number: 0
+  # Used if the cover/calibrator is unreachable/not connected.
+  fallback_cover_closed: false
+  # Electrons/second/pixel the calibrator produces at Brightness == MaxBrightness;
+  # scales linearly down with the device's reported Brightness fraction. Tuned
+  # so a 1s exposure at max brightness uses ~75% of this camera's full well.
+  calibrator_e_per_s_at_max_brightness: 1.5e4
   request_timeout_s: 2.0
 
 camera:

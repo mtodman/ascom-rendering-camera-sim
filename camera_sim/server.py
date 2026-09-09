@@ -25,7 +25,14 @@ def create_app(settings: Settings | None = None, config_path: Path | None = None
     else:
         raw_config = load_raw_or_empty(config_path)
     catalog = StarCatalog(settings.catalog_path())
-    device = CameraDevice(settings.camera, settings.telescope, settings.focuser, catalog)
+    device = CameraDevice(
+        settings.camera,
+        settings.telescope,
+        settings.focuser,
+        settings.filter_wheel,
+        settings.cover_calibrator,
+        catalog,
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

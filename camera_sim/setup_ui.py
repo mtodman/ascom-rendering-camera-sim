@@ -19,13 +19,20 @@ from .config import (
     REPO_ROOT,
     CameraConfig,
     CatalogConfig,
+    CoverCalibratorConfig,
+    FilterWheelConfig,
     FocuserConfig,
     ServerConfig,
     Settings,
     TelescopeConfig,
     update_model_in_place,
 )
-from .discovery_client import discover_focusers, discover_telescopes
+from .discovery_client import (
+    discover_covercalibrators,
+    discover_filterwheels,
+    discover_focusers,
+    discover_telescopes,
+)
 from .form_utils import describe_fields, parse_form_to_model
 from .sky_model import StarCatalog
 
@@ -42,6 +49,8 @@ def build_setup_router(
         cfg_server: ServerConfig,
         cfg_tel: TelescopeConfig,
         cfg_foc: FocuserConfig,
+        cfg_fw: FilterWheelConfig,
+        cfg_cc: CoverCalibratorConfig,
         cfg_cam: CameraConfig,
         cfg_cat: CatalogConfig,
     ):
@@ -67,6 +76,23 @@ def build_setup_router(
                 "fields": describe_fields(cfg_foc),
             },
             {
+                "id": "filterwheel",
+                "title": "Filter Wheel",
+                "desc": "Where to query for filter position. Each filter's own FocusOffsets "
+                "value (read from the device) is added to the focuser's defocus, so a "
+                "non-parfocal filter set shifts focus repeatably by filter. Leave "
+                "unconfigured/unreachable for no effect.",
+                "fields": describe_fields(cfg_fw),
+            },
+            {
+                "id": "covercalibrator",
+                "title": "Cover / Calibrator",
+                "desc": "Where to query for cover/calibrator state. A closed cover blocks the star "
+                "field entirely; an on+ready calibrator behind it renders a uniform flat-field "
+                "illumination instead. Leave unconfigured/unreachable for no effect (cover always open).",
+                "fields": describe_fields(cfg_cc),
+            },
+            {
                 "id": "camera",
                 "title": "Camera sensor & simulation",
                 "desc": "Applied to the next exposure immediately, no restart needed.",
@@ -82,7 +108,11 @@ def build_setup_router(
 
     async def _status() -> dict:
         pointing = await asyncio.to_thread(device.telescope.get_pointing)
-        defocus_um, focuser_source = await asyncio.to_thread(device.focuser.get_defocus_um)
+        fw_state = await asyncio.to_thread(device.filter_wheel.get_state)
+        defocus_um, focuser_source = await asyncio.to_thread(
+            device.focuser.get_defocus_um, fw_state.focus_offset_steps
+        )
+        cc_state = await asyncio.to_thread(device.cover_calibrator.get_state)
         return {
             "connected": device.common.connected,
             "camera_state": device.camera_state.name,
@@ -93,6 +123,15 @@ def build_setup_router(
             "focuser_url": f"{settings.focuser.alpaca_base_url}/api/v1/focuser/{settings.focuser.device_number}",
             "focuser_defocus_um": round(defocus_um, 1),
             "focuser_source": focuser_source,
+            "filterwheel_url": f"{settings.filter_wheel.alpaca_base_url}/api/v1/filterwheel/{settings.filter_wheel.device_number}",
+            "filter_name": fw_state.name,
+            "filter_position": fw_state.position,
+            "filter_offset_steps": fw_state.focus_offset_steps,
+            "filterwheel_source": fw_state.source,
+            "covercalibrator_url": f"{settings.cover_calibrator.alpaca_base_url}/api/v1/covercalibrator/{settings.cover_calibrator.device_number}",
+            "cover_closed": cc_state.cover_closed,
+            "calibrator_e_per_s": round(cc_state.calibrator_e_per_s, 1),
+            "covercalibrator_source": cc_state.source,
         }
 
     @router.get("/")
@@ -146,6 +185,34 @@ def build_setup_router(
             ]
         )
 
+    @router.get("/setup/v1/camera/{device_number}/discover_filterwheels")
+    async def discover_filterwheels_endpoint(device_number: int):
+        found = await discover_filterwheels(settings.server.discovery_port)
+        return JSONResponse(
+            [
+                {
+                    "base_url": f.base_url,
+                    "device_number": f.device_number,
+                    "label": f.label,
+                }
+                for f in found
+            ]
+        )
+
+    @router.get("/setup/v1/camera/{device_number}/discover_covercalibrators")
+    async def discover_covercalibrators_endpoint(device_number: int):
+        found = await discover_covercalibrators(settings.server.discovery_port)
+        return JSONResponse(
+            [
+                {
+                    "base_url": c.base_url,
+                    "device_number": c.device_number,
+                    "label": c.label,
+                }
+                for c in found
+            ]
+        )
+
     @router.get("/setup/v1/camera/{device_number}/setup")
     async def camera_setup_get(request: Request, device_number: int):
         return templates.TemplateResponse(
@@ -155,7 +222,13 @@ def build_setup_router(
                 "server_name": settings.server.server_name,
                 "status": await _status(),
                 "sections": _sections(
-                    settings.server, settings.telescope, settings.focuser, settings.camera, settings.catalog
+                    settings.server,
+                    settings.telescope,
+                    settings.focuser,
+                    settings.filter_wheel,
+                    settings.cover_calibrator,
+                    settings.camera,
+                    settings.catalog,
                 ),
                 "saved": False,
                 "errors": [],
@@ -170,9 +243,13 @@ def build_setup_router(
         new_server, server_errors = parse_form_to_model(ServerConfig, form, "server")
         new_telescope, telescope_errors = parse_form_to_model(TelescopeConfig, form, "telescope")
         new_focuser, focuser_errors = parse_form_to_model(FocuserConfig, form, "focuser")
+        new_fw, fw_errors = parse_form_to_model(FilterWheelConfig, form, "filterwheel")
+        new_cc, cc_errors = parse_form_to_model(CoverCalibratorConfig, form, "covercalibrator")
         new_camera, camera_errors = parse_form_to_model(CameraConfig, form, "camera")
         new_catalog, catalog_errors = parse_form_to_model(CatalogConfig, form, "catalog")
-        errors = server_errors + telescope_errors + focuser_errors + camera_errors + catalog_errors
+        errors = (
+            server_errors + telescope_errors + focuser_errors + fw_errors + cc_errors + camera_errors + catalog_errors
+        )
         server_changed = False
 
         new_catalog_obj = None
@@ -196,6 +273,8 @@ def build_setup_router(
             update_model_in_place(settings.server, new_server)
             update_model_in_place(settings.telescope, new_telescope)
             update_model_in_place(settings.focuser, new_focuser)
+            update_model_in_place(settings.filter_wheel, new_fw)
+            update_model_in_place(settings.cover_calibrator, new_cc)
             update_model_in_place(settings.camera, new_camera)
             update_model_in_place(settings.catalog, new_catalog)
             if new_catalog_obj is not None:
@@ -209,7 +288,13 @@ def build_setup_router(
                 "server_name": settings.server.server_name,
                 "status": await _status(),
                 "sections": _sections(
-                    settings.server, settings.telescope, settings.focuser, settings.camera, settings.catalog
+                    settings.server,
+                    settings.telescope,
+                    settings.focuser,
+                    settings.filter_wheel,
+                    settings.cover_calibrator,
+                    settings.camera,
+                    settings.catalog,
                 ),
                 "saved": not errors,
                 "errors": errors,

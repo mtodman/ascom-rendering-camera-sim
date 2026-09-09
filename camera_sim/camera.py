@@ -28,7 +28,9 @@ from .alpaca_errors import (
     NotConnectedException,
     NotImplementedException,
 )
-from .config import CameraConfig, FocuserConfig, TelescopeConfig
+from .config import CameraConfig, CoverCalibratorConfig, FilterWheelConfig, FocuserConfig, TelescopeConfig
+from .cover_calibrator_client import CoverCalibratorClient
+from .filter_wheel_client import FilterWheelClient
 from .focuser_client import FocuserClient
 from .sky_model import StarCatalog, project_stars
 from .telescope_client import TelescopeClient
@@ -46,11 +48,21 @@ class CameraState(enum.IntEnum):
 
 
 class CameraDevice:
-    def __init__(self, cam_cfg: CameraConfig, tel_cfg: TelescopeConfig, foc_cfg: FocuserConfig, catalog: StarCatalog):
+    def __init__(
+        self,
+        cam_cfg: CameraConfig,
+        tel_cfg: TelescopeConfig,
+        foc_cfg: FocuserConfig,
+        fw_cfg: FilterWheelConfig,
+        cc_cfg: CoverCalibratorConfig,
+        catalog: StarCatalog,
+    ):
         self.cfg = cam_cfg
         self.catalog = catalog
         self.telescope = TelescopeClient(tel_cfg)
         self.focuser = FocuserClient(foc_cfg)
+        self.filter_wheel = FilterWheelClient(fw_cfg)
+        self.cover_calibrator = CoverCalibratorClient(cc_cfg)
         self.rng = np.random.default_rng()
 
         self.common = CommonDeviceState(
@@ -162,10 +174,14 @@ class CameraDevice:
             self.camera_state = CameraState.READING
 
             pointing = await asyncio.to_thread(self.telescope.get_pointing)
-            defocus_um, focuser_source = await asyncio.to_thread(self.focuser.get_defocus_um)
+            fw_state = await asyncio.to_thread(self.filter_wheel.get_state)
+            defocus_um, focuser_source = await asyncio.to_thread(
+                self.focuser.get_defocus_um, fw_state.focus_offset_steps
+            )
+            cc_state = await asyncio.to_thread(self.cover_calibrator.get_state)
             center_ra_deg = pointing.ra_hours * 15.0
 
-            if light:
+            if light and not cc_state.cover_closed:
                 stars = project_stars(
                     self.catalog,
                     center_ra_deg=center_ra_deg,
@@ -195,6 +211,8 @@ class CameraDevice:
                 defocus_um,
                 self.ccd_temperature,
                 self.rng,
+                cc_state.cover_closed,
+                cc_state.calibrator_e_per_s,
             )
             region_e = image_synth.subframe_and_bin(
                 full_frame_e, self.start_x, self.start_y, self.num_x, self.num_y, self.bin_x, self.bin_y
@@ -205,11 +223,18 @@ class CameraDevice:
             self.percent_completed = 100
             self.camera_state = CameraState.IDLE
             self.image_ready = True
+            # Calibrator only actually affects the frame when the cover is
+            # closed (see render_frame) - log what was applied, not just the
+            # raw device reading, so this isn't misread as "calibrator light
+            # blended into the star field" when the cover happens to be open.
+            applied_calibrator_e_per_s = cc_state.calibrator_e_per_s if cc_state.cover_closed else 0.0
             logger.info(
                 "exposure done: %.3fs light=%s pointing=(%.4fh,%.4f deg,%s) stars_in_frame=%d "
-                "defocus=%.1fum(%s)",
+                "filter=%r(pos=%d,offset=%dsteps,%s) defocus=%.1fum(%s) cover_closed=%s calibrator=%.1fe-/s(%s)",
                 duration_s, light, pointing.ra_hours, pointing.dec_deg, pointing.source, len(stars.vmag),
+                fw_state.name, fw_state.position, fw_state.focus_offset_steps, fw_state.source,
                 defocus_um, focuser_source,
+                cc_state.cover_closed, applied_calibrator_e_per_s, cc_state.source,
             )
         except asyncio.CancelledError:
             self.camera_state = CameraState.IDLE

@@ -62,13 +62,21 @@ def render_frame(
     defocus_um: float,
     ccd_temperature_c: float,
     rng: np.random.Generator,
+    cover_closed: bool = False,
+    calibrator_e_per_s: float = 0.0,
 ) -> np.ndarray:
     """Returns a full-resolution (num_pixels_y, num_pixels_x) float64 array
     of electrons collected per pixel (before subframing/binning/ADC)."""
     w, h = cam.num_pixels_x, cam.num_pixels_y
     image_e = np.zeros((h, w), dtype=np.float64)
 
-    if light and exposure_s > 0 and len(stars.vmag) > 0:
+    if light and exposure_s > 0 and cover_closed:
+        # Cover blocks the star field entirely, same as a lens cap or a
+        # closed flat panel - a calibrator behind it (if on) still
+        # illuminates the sensor uniformly, exactly like a real flat frame.
+        if calibrator_e_per_s > 0:
+            image_e += calibrator_e_per_s * exposure_s
+    elif light and exposure_s > 0 and len(stars.vmag) > 0:
         scale = plate_scale_arcsec_per_px(cam.pixel_size_um, focal_length_mm)
         defocus_fwhm = defocus_blur_fwhm_arcsec(defocus_um, aperture_diameter_mm, focal_length_mm)
         total_fwhm = float(np.hypot(cam.seeing_fwhm_arcsec, defocus_fwhm))

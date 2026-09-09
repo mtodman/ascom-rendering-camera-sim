@@ -32,6 +32,23 @@
         {% if status.focuser_source == "fallback" %}(focuser unreachable/disconnected - rendering in focus){% endif %}
       </span>
     </div>
+    <div><span class="k">Filter Wheel:</span> <span class="v">{{ status.filterwheel_url }}</span></div>
+    <div><span class="k">Filter:</span> <span class="v">{{ status.filter_name }} (pos {{ status.filter_position }}, offset {{ status.filter_offset_steps }} steps)</span></div>
+    <div><span class="k">Filter source:</span>
+      <span class="v">
+        {{ status.filterwheel_source }}
+        {% if status.filterwheel_source == "fallback" %}(unreachable/disconnected/moving - no offset){% endif %}
+      </span>
+    </div>
+    <div><span class="k">Cover/Calibrator:</span> <span class="v">{{ status.covercalibrator_url }}</span></div>
+    <div><span class="k">Cover:</span> <span class="v">{{ "Closed" if status.cover_closed else "Open" }}</span></div>
+    <div><span class="k">Calibrator:</span> <span class="v">{{ status.calibrator_e_per_s }}e-/s/px</span></div>
+    <div><span class="k">Cover/Cal. source:</span>
+      <span class="v">
+        {{ status.covercalibrator_source }}
+        {% if status.covercalibrator_source == "fallback" %}(unreachable/disconnected - cover always open){% endif %}
+      </span>
+    </div>
   </div>
 </div>
 
@@ -40,7 +57,7 @@
   <div class="panel">
     <h2>{{ section.title }}</h2>
     {% if section.desc %}<p class="desc">{{ section.desc }}</p>{% endif %}
-    {% if section.id in ("telescope", "focuser") %}
+    {% if section.id in ("telescope", "focuser", "filterwheel", "covercalibrator") %}
     <div class="discover-row" data-device-type="{{ section.id }}">
       <button type="button" class="btn secondary discover-btn">Discover {{ section.id }}s on network</button>
       <span class="desc discover-status"></span>

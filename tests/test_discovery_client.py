@@ -10,13 +10,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 
-from camera_sim.discovery_client import discover_focusers, discover_telescopes
+from camera_sim.discovery_client import (
+    discover_covercalibrators,
+    discover_filterwheels,
+    discover_focusers,
+    discover_telescopes,
+)
 
 FAKE_DEVICES_BODY = {
     "Value": [
         {"DeviceName": "Fake Camera", "DeviceType": "Camera", "DeviceNumber": 0, "UniqueID": "cam-1"},
         {"DeviceName": "Fake Mount", "DeviceType": "Telescope", "DeviceNumber": 0, "UniqueID": "tel-1"},
         {"DeviceName": "Fake Focuser", "DeviceType": "Focuser", "DeviceNumber": 0, "UniqueID": "foc-1"},
+        {"DeviceName": "Fake FilterWheel", "DeviceType": "FilterWheel", "DeviceNumber": 0, "UniqueID": "fw-1"},
+        {"DeviceName": "Fake CoverCalibrator", "DeviceType": "CoverCalibrator", "DeviceNumber": 0, "UniqueID": "cc-1"},
     ]
 }
 
@@ -139,6 +146,42 @@ async def test_discover_focusers_finds_fake_device(fake_alpaca_device):
 @pytest.mark.asyncio
 async def test_discover_focusers_no_responders_returns_empty():
     found = await discover_focusers(discovery_port=_free_udp_port(), timeout_s=0.3)
+    assert found == []
+
+
+@pytest.mark.asyncio
+async def test_discover_filterwheels_finds_fake_device(fake_alpaca_device):
+    found = await discover_filterwheels(
+        discovery_port=fake_alpaca_device["discovery_port"], timeout_s=0.8
+    )
+    assert len(found) == 1
+    fw = found[0]
+    assert fw.device_name == "Fake FilterWheel"
+    assert fw.port == fake_alpaca_device["http_port"]
+    assert fw.base_url == f"http://127.0.0.1:{fake_alpaca_device['http_port']}"
+
+
+@pytest.mark.asyncio
+async def test_discover_filterwheels_no_responders_returns_empty():
+    found = await discover_filterwheels(discovery_port=_free_udp_port(), timeout_s=0.3)
+    assert found == []
+
+
+@pytest.mark.asyncio
+async def test_discover_covercalibrators_finds_fake_device(fake_alpaca_device):
+    found = await discover_covercalibrators(
+        discovery_port=fake_alpaca_device["discovery_port"], timeout_s=0.8
+    )
+    assert len(found) == 1
+    cc = found[0]
+    assert cc.device_name == "Fake CoverCalibrator"
+    assert cc.port == fake_alpaca_device["http_port"]
+    assert cc.base_url == f"http://127.0.0.1:{fake_alpaca_device['http_port']}"
+
+
+@pytest.mark.asyncio
+async def test_discover_covercalibrators_no_responders_returns_empty():
+    found = await discover_covercalibrators(discovery_port=_free_udp_port(), timeout_s=0.3)
     assert found == []
 
 

@@ -15,7 +15,7 @@ _client_id = 1234
 _transaction_counter = itertools.count(1)
 
 
-def get_alpaca_property(base_url: str, prop: str, timeout_s: float) -> float | bool | str | None:
+def get_alpaca_property(base_url: str, prop: str, timeout_s: float) -> float | bool | str | list | None:
     """GETs a single Alpaca device property (e.g. "rightascension",
     "position"). Returns None (logging a warning) on any transport error,
     non-2xx response, or a non-zero Alpaca ErrorNumber - callers treat that

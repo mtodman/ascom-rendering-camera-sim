@@ -16,9 +16,19 @@ the real patch of sky the camera is pointed at:
    position and simulates defocus: geometric-optics blur from the focuser's
    offset from a configured in-focus reference position, combined with
    atmospheric seeing.
-5. Renders a realistic frame: Gaussian star PSFs scaled by magnitude,
-   exposure time, and focus, plus dark current, bias, read noise, shot
-   noise, then applies binning/subframing/gain/ADC quantization.
+5. Optionally queries a configured **Alpaca filter wheel** device for its
+   current position and adds that filter's own `FocusOffsets` value (read
+   directly from the device, in the same step units as the focuser) into the
+   defocus calculation — a non-parfocal filter set shifts focus repeatably
+   and predictably by filter, exactly like real hardware.
+6. Optionally queries a configured **Alpaca cover/calibrator** device: a
+   closed cover blocks the star field entirely (like a lens cap), and an
+   on+ready calibrator behind it renders a uniform flat-field illumination
+   instead — exactly like a real flat panel.
+7. Renders a realistic frame: Gaussian star PSFs scaled by magnitude,
+   exposure time, and focus (or flat-field illumination if the cover is
+   closed), plus dark current, bias, read noise, shot noise, then applies
+   binning/subframing/gain/ADC quantization.
 
 No internet access is needed at runtime — the star catalog is a local CSV
 file built once by `scripts/build_catalog.py`.
@@ -46,8 +56,8 @@ catalog changes apply immediately (no restart), and everything is written
 back to `config.yaml`. Server/network changes (host/port/discovery port)
 still need a process restart to take effect, which the page will tell you.
 
-The Telescope and Focuser sections each have a **"Discover
-telescopes/focusers on network"** button: it broadcasts the Alpaca discovery
+The Telescope, Focuser, Filter Wheel, and Cover/Calibrator sections each have a
+**"Discover ... on network"** button: it broadcasts the Alpaca discovery
 probe, queries every responding device server's Management API for devices
 of that type, and lets you pick one from a dropdown to auto-fill the Alpaca
 Base URL / Device Number fields — no need to know a driver's address ahead
@@ -82,6 +92,22 @@ Alternatively, edit `config.yaml` directly (restart the server afterwards):
 - `focuser.use_focuser_step_size` — if true, reads the focuser's Alpaca
   `StepSize` property (already in microns, no unit conversion needed);
   otherwise falls back to `focuser.fallback_step_size_um`.
+- `filter_wheel.alpaca_base_url` / `device_number` — where to find an Alpaca
+  filter wheel to query for the current filter's focus offset. Leave
+  unreachable/unconfigured (the default) and every exposure renders exactly
+  like before this feature existed (offset always 0). No local tunable is
+  needed — the real device's own per-filter `FocusOffsets` values are used
+  directly, so the offset is exactly what the device reports.
+- `cover_calibrator.alpaca_base_url` / `device_number` — where to find an
+  Alpaca cover/calibrator to query for cover state and calibrator
+  brightness. Leave unreachable/unconfigured (the default) and every
+  exposure renders exactly like before this feature existed (cover always
+  open, calibrator off).
+- `cover_calibrator.calibrator_e_per_s_at_max_brightness` — electrons/
+  second/pixel the calibrator produces at `Brightness == MaxBrightness`;
+  scales linearly down with the device's reported brightness fraction. The
+  default is tuned for the default camera's well depth — adjust for other
+  sensors/well depths, or to make flats saturate/not saturate as desired.
 - `camera.*` — sensor pixel size/resolution, well depth, read noise, dark
   current, seeing FWHM, and `zero_point_e_per_s_mag0` (tune this to control
   overall brightness/exposure behavior).
@@ -128,6 +154,30 @@ blurrier as `position` moves away from it):
 
 ```bash
 curl -X PUT "http://localhost:11114/debug/position?position=15200"
+```
+
+A matching mock Alpaca filter wheel is included for testing per-filter focus offsets:
+
+```bash
+./venv/bin/python scripts/mock_filterwheel.py
+```
+
+Change filters at any time (defaults to `["Red","Green","Blue","Clear","Ha","OIII"]` with offsets `[500,550,150,0,800,250]` steps — filter 4 "Ha" adds 800 steps, i.e. `800 * step_size_um` of extra defocus, on top of whatever the focuser itself is doing):
+
+```bash
+curl -X PUT "http://localhost:11117/api/v1/filterwheel/0/position" -d "Position=4"
+```
+
+A matching mock Alpaca cover/calibrator is included for testing the closed-cover/flat-field behavior:
+
+```bash
+./venv/bin/python scripts/mock_covercalibrator.py
+```
+
+Toggle it at any time:
+
+```bash
+curl -X PUT "http://localhost:11116/debug/state?cover=closed&calibrator_on=true&brightness=50"
 ```
 
 Then drive an exposure and render a PNG preview:

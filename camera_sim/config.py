@@ -54,6 +54,27 @@ class FocuserConfig(BaseModel):
     request_timeout_s: float = 2.0
 
 
+class FilterWheelConfig(BaseModel):
+    alpaca_base_url: str = "http://localhost:11117"
+    device_number: int = 0
+    request_timeout_s: float = 2.0
+
+
+class CoverCalibratorConfig(BaseModel):
+    alpaca_base_url: str = "http://localhost:11116"
+    device_number: int = 0
+    # Used if the cover/calibrator is unreachable/not connected - "open, no
+    # calibrator" means no effect at all, i.e. today's behavior.
+    fallback_cover_closed: bool = False
+    # Electrons/second/pixel the calibrator produces at Brightness == MaxBrightness;
+    # scales linearly down with the device's reported Brightness fraction.
+    # Tuned so a 1s exposure at max brightness uses ~75% of the default
+    # camera's full_well_capacity_e (20000) - a strong, visible flat signal
+    # without saturating outright; adjust to taste for other sensors/well depths.
+    calibrator_e_per_s_at_max_brightness: float = 1.5e4
+    request_timeout_s: float = 2.0
+
+
 class CameraConfig(BaseModel):
     sensor_name: str = "Simulated Sensor"
     sensor_type: str = "Monochrome"
@@ -98,6 +119,8 @@ class Settings(BaseModel):
     server: ServerConfig = ServerConfig()
     telescope: TelescopeConfig = TelescopeConfig()
     focuser: FocuserConfig = FocuserConfig()
+    filter_wheel: FilterWheelConfig = FilterWheelConfig()
+    cover_calibrator: CoverCalibratorConfig = CoverCalibratorConfig()
     camera: CameraConfig = CameraConfig()
     catalog: CatalogConfig = CatalogConfig()
 

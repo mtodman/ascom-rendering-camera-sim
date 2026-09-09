@@ -53,6 +53,40 @@ class DiscoveredFocuser:
         return f"{self.device_name} ({self.host}:{self.port}, dev #{self.device_number})"
 
 
+@dataclass
+class DiscoveredFilterWheel:
+    host: str
+    port: int
+    device_number: int
+    device_name: str
+    unique_id: str
+
+    @property
+    def base_url(self) -> str:
+        return f"http://{self.host}:{self.port}"
+
+    @property
+    def label(self) -> str:
+        return f"{self.device_name} ({self.host}:{self.port}, dev #{self.device_number})"
+
+
+@dataclass
+class DiscoveredCoverCalibrator:
+    host: str
+    port: int
+    device_number: int
+    device_name: str
+    unique_id: str
+
+    @property
+    def base_url(self) -> str:
+        return f"http://{self.host}:{self.port}"
+
+    @property
+    def label(self) -> str:
+        return f"{self.device_name} ({self.host}:{self.port}, dev #{self.device_number})"
+
+
 class _DiscoveryProtocol(asyncio.DatagramProtocol):
     def __init__(self, responders: set[tuple[str, int]]):
         self.responders = responders
@@ -134,6 +168,32 @@ async def _focusers_from_server(client: httpx.AsyncClient, host: str, port: int)
     ]
 
 
+async def _filterwheels_from_server(client: httpx.AsyncClient, host: str, port: int) -> list[DiscoveredFilterWheel]:
+    return [
+        DiscoveredFilterWheel(
+            host=host,
+            port=port,
+            device_number=d.get("DeviceNumber", 0),
+            device_name=d.get("DeviceName", "FilterWheel"),
+            unique_id=d.get("UniqueID", ""),
+        )
+        for d in await _devices_of_type(client, host, port, "FilterWheel")
+    ]
+
+
+async def _covercalibrators_from_server(client: httpx.AsyncClient, host: str, port: int) -> list[DiscoveredCoverCalibrator]:
+    return [
+        DiscoveredCoverCalibrator(
+            host=host,
+            port=port,
+            device_number=d.get("DeviceNumber", 0),
+            device_name=d.get("DeviceName", "CoverCalibrator"),
+            unique_id=d.get("UniqueID", ""),
+        )
+        for d in await _devices_of_type(client, host, port, "CoverCalibrator")
+    ]
+
+
 def _dedupe(found: list) -> list:
     # A multi-homed host (multiple network interfaces) answers a broadcast
     # probe once per interface, so the same physical device can otherwise
@@ -167,3 +227,25 @@ async def discover_focusers(discovery_port: int = 32227, timeout_s: float = 2.0)
             *(_focusers_from_server(client, host, port) for host, port in responders)
         )
     return _dedupe([f for group in results for f in group])
+
+
+async def discover_filterwheels(discovery_port: int = 32227, timeout_s: float = 2.0) -> list[DiscoveredFilterWheel]:
+    responders = await _broadcast_for_alpaca_servers(discovery_port, timeout_s)
+    if not responders:
+        return []
+    async with httpx.AsyncClient(timeout=2.0) as client:
+        results = await asyncio.gather(
+            *(_filterwheels_from_server(client, host, port) for host, port in responders)
+        )
+    return _dedupe([f for group in results for f in group])
+
+
+async def discover_covercalibrators(discovery_port: int = 32227, timeout_s: float = 2.0) -> list[DiscoveredCoverCalibrator]:
+    responders = await _broadcast_for_alpaca_servers(discovery_port, timeout_s)
+    if not responders:
+        return []
+    async with httpx.AsyncClient(timeout=2.0) as client:
+        results = await asyncio.gather(
+            *(_covercalibrators_from_server(client, host, port) for host, port in responders)
+        )
+    return _dedupe([c for group in results for c in group])

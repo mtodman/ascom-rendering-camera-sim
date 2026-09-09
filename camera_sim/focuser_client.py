@@ -65,13 +65,18 @@ class FocuserClient:
 
         return FocuserState(position=int(position), step_size_um=step_size, source="focuser")
 
-    def get_defocus_um(self) -> tuple[float, str]:
+    def get_defocus_um(self, extra_offset_steps: int = 0) -> tuple[float, str]:
         """Returns (defocus in microns at the focal plane, source), where
         source is "focuser" if this came from a live query or "fallback" if
         the configured focuser was unreachable/disconnected (defocus 0 in
         that case). Single source of truth for this arithmetic - used by
         both the exposure renderer and the setup page's status display.
+
+        `extra_offset_steps` adds an additional offset (in the same step
+        units as the focuser) before converting to microns - used to fold a
+        filter wheel's per-filter FocusOffsets into the same calculation
+        without a second network round-trip to the focuser.
         """
         state = self.get_state()
-        defocus_um = (state.position - self.cfg.in_focus_position) * state.step_size_um
+        defocus_um = (state.position - self.cfg.in_focus_position + extra_offset_steps) * state.step_size_um
         return defocus_um, state.source

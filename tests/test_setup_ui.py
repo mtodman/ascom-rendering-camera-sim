@@ -146,6 +146,8 @@ def _full_form(settings: Settings) -> dict:
         "server": settings.server,
         "telescope": settings.telescope,
         "focuser": settings.focuser,
+        "filterwheel": settings.filter_wheel,
+        "covercalibrator": settings.cover_calibrator,
         "camera": settings.camera,
         "catalog": settings.catalog,
     }
