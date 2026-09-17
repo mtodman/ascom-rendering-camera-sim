@@ -13,11 +13,27 @@ notify() {
     notify-send -i "$1" "Camera Simulator" "$2" 2>/dev/null || true
 }
 
+# A PID file surviving a reboot can point at a PID that the kernel has since
+# handed to a completely unrelated process, so `kill -0` alone isn't enough -
+# it happily reports "alive" for that impostor. Cross-check /proc's cmdline
+# too, since that's reset (and PIDs reassigned) on every boot.
+is_camerasim_pid() {
+    local pid="$1"
+    [[ -n "$pid" ]] || return 1
+    kill -0 "$pid" 2>/dev/null || return 1
+    [[ -r "/proc/$pid/cmdline" ]] || return 1
+    grep -qa "camera_sim.server" "/proc/$pid/cmdline"
+}
+
 mkdir -p "$RUN_DIR"
 
-if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+if [[ -f "$PID_FILE" ]] && is_camerasim_pid "$(cat "$PID_FILE")"; then
     notify "media-playback-start" "Already running (PID $(cat "$PID_FILE"))."
     exit 0
+elif [[ -f "$PID_FILE" ]]; then
+    # Stale PID file (process gone, or reused by something else since the
+    # last boot) - clear it out so it can't be mistaken for a live run again.
+    rm -f "$PID_FILE"
 fi
 
 if [[ ! -x "$PYTHON_BIN" ]]; then
@@ -34,7 +50,7 @@ disown
 echo $! >"$PID_FILE"
 
 sleep 2
-if kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+if is_camerasim_pid "$(cat "$PID_FILE")"; then
     URL="$(grep -oE 'Uvicorn running on [^[:space:]]+' "$LOG_FILE" | tail -n1 | sed 's/Uvicorn running on //')"
     notify "media-playback-start" "Started (PID $(cat "$PID_FILE"))${URL:+ - $URL}."
 else
