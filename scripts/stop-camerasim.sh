@@ -9,7 +9,12 @@ RUN_DIR="$PROJECT_DIR/run"
 PID_FILE="$RUN_DIR/camerasim.pid"
 
 notify() {
-    notify-send -i "$1" "Camera Simulator" "$2" 2>/dev/null || true
+    # A real popup window (zenity), not a toast: stays up until clicked, or
+    # auto-closes after 6s if left unattended. Backgrounded so the script
+    # itself doesn't block waiting for someone to dismiss it.
+    local icon="$1" message="$2" kind="--info"
+    [[ "$icon" == "dialog-error" ]] && kind="--error"
+    (zenity "$kind" --title="Camera Simulator" --text="$message" --timeout=6 2>/dev/null &)
 }
 
 # A PID file surviving a reboot can point at a PID the kernel has since
