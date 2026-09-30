@@ -175,9 +175,8 @@ class CameraDevice:
 
             pointing = await asyncio.to_thread(self.telescope.get_pointing)
             fw_state = await asyncio.to_thread(self.filter_wheel.get_state)
-            defocus_um, focuser_source = await asyncio.to_thread(
-                self.focuser.get_defocus_um, fw_state.focus_offset_steps
-            )
+            foc_state = await asyncio.to_thread(self.focuser.get_state)
+            defocus_um = self.focuser.defocus_um_for(foc_state, fw_state.focus_offset_steps)
             cc_state = await asyncio.to_thread(self.cover_calibrator.get_state)
             center_ra_deg = pointing.ra_hours * 15.0
 
@@ -230,10 +229,12 @@ class CameraDevice:
             applied_calibrator_e_per_s = cc_state.calibrator_e_per_s if cc_state.cover_closed else 0.0
             logger.info(
                 "exposure done: %.3fs light=%s pointing=(%.4fh,%.4f deg,%s) stars_in_frame=%d "
-                "filter=%r(pos=%d,offset=%dsteps,%s) defocus=%.1fum(%s) cover_closed=%s calibrator=%.1fe-/s(%s)",
+                "filter=%r(pos=%d,offset=%dsteps,%s) focuser=(reported=%d,optical=%s) defocus=%.1fum(%s) "
+                "cover_closed=%s calibrator=%.1fe-/s(%s)",
                 duration_s, light, pointing.ra_hours, pointing.dec_deg, pointing.source, len(stars.vmag),
                 fw_state.name, fw_state.position, fw_state.focus_offset_steps, fw_state.source,
-                defocus_um, focuser_source,
+                foc_state.reported_position, foc_state.position if foc_state.optical else "n/a",
+                defocus_um, foc_state.source,
                 cc_state.cover_closed, applied_calibrator_e_per_s, cc_state.source,
             )
         except asyncio.CancelledError:

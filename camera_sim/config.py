@@ -51,6 +51,12 @@ class FocuserConfig(BaseModel):
     in_focus_position: int = 0
     fallback_step_size_um: float = 5.0
     use_focuser_step_size: bool = True
+    # If true, asks the focuser for its true drawtube position via the
+    # "OpticalPosition" Alpaca Action (implemented by this project's
+    # focuser_sim, which simulates backlash) and renders defocus from that
+    # instead of the reported Position. Focusers that don't support the
+    # action fall back to Position automatically.
+    use_optical_position_action: bool = True
     request_timeout_s: float = 2.0
 
 
@@ -140,19 +146,28 @@ class Settings(BaseModel):
         isn't actually changing; without it, this falls back to a fresh
         (comment-free) dump.
         """
-        if raw is None:
-            raw = CommentedMap()
-        for section_name in self.__class__.model_fields:
-            section_model: BaseModel = getattr(self, section_name)
-            section_raw = raw.get(section_name)
-            if not isinstance(section_raw, CommentedMap):
-                section_raw = CommentedMap()
-                raw[section_name] = section_raw
-            for field_name, value in section_model.model_dump().items():
-                if section_raw.get(field_name, _UNSET) != value:
-                    section_raw[field_name] = value
-        with open(path, "w") as f:
-            _yaml_rt.dump(raw, f)
+        save_sections_yaml(self, path, raw)
+
+
+def save_sections_yaml(settings: BaseModel, path: Path, raw: CommentedMap | None = None) -> None:
+    """Writes a sectioned settings model (each field itself a BaseModel,
+    like `Settings`) to YAML, preserving `raw`'s comments/formatting for
+    every field whose value isn't changing. Shared with the focuser
+    simulator's own settings file.
+    """
+    if raw is None:
+        raw = CommentedMap()
+    for section_name in type(settings).model_fields:
+        section_model: BaseModel = getattr(settings, section_name)
+        section_raw = raw.get(section_name)
+        if not isinstance(section_raw, CommentedMap):
+            section_raw = CommentedMap()
+            raw[section_name] = section_raw
+        for field_name, value in section_model.model_dump().items():
+            if section_raw.get(field_name, _UNSET) != value:
+                section_raw[field_name] = value
+    with open(path, "w") as f:
+        _yaml_rt.dump(raw, f)
 
 
 def resolve_config_path(path: str | None = None) -> Path:

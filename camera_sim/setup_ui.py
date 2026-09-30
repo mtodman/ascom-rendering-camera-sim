@@ -72,7 +72,10 @@ def build_setup_router(
                 "title": "Focuser",
                 "desc": "Where to query for focus position, to simulate defocus. "
                 "Set \"In Focus Position\" to whatever step position is perfectly focused "
-                "for your setup - leave the focuser unconfigured/unreachable to always render in focus.",
+                "for your setup - leave the focuser unconfigured/unreachable to always render in focus. "
+                "With \"Use Optical Position Action\" on, a focuser that reports its true drawtube "
+                "position (e.g. this project's backlash focuser simulator) is rendered from that, "
+                "so backlash shows up in the frames.",
                 "fields": describe_fields(cfg_foc),
             },
             {
@@ -109,9 +112,8 @@ def build_setup_router(
     async def _status() -> dict:
         pointing = await asyncio.to_thread(device.telescope.get_pointing)
         fw_state = await asyncio.to_thread(device.filter_wheel.get_state)
-        defocus_um, focuser_source = await asyncio.to_thread(
-            device.focuser.get_defocus_um, fw_state.focus_offset_steps
-        )
+        foc_state = await asyncio.to_thread(device.focuser.get_state)
+        defocus_um = device.focuser.defocus_um_for(foc_state, fw_state.focus_offset_steps)
         cc_state = await asyncio.to_thread(device.cover_calibrator.get_state)
         return {
             "connected": device.common.connected,
@@ -122,7 +124,9 @@ def build_setup_router(
             "telescope_pointing_source": pointing.source,
             "focuser_url": f"{settings.focuser.alpaca_base_url}/api/v1/focuser/{settings.focuser.device_number}",
             "focuser_defocus_um": round(defocus_um, 1),
-            "focuser_source": focuser_source,
+            "focuser_source": foc_state.source,
+            "focuser_reported_position": foc_state.reported_position,
+            "focuser_optical_position": foc_state.position if foc_state.optical else None,
             "filterwheel_url": f"{settings.filter_wheel.alpaca_base_url}/api/v1/filterwheel/{settings.filter_wheel.device_number}",
             "filter_name": fw_state.name,
             "filter_position": fw_state.position,

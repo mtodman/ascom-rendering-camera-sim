@@ -92,6 +92,11 @@ Alternatively, edit `config.yaml` directly (restart the server afterwards):
 - `focuser.use_focuser_step_size` — if true, reads the focuser's Alpaca
   `StepSize` property (already in microns, no unit conversion needed);
   otherwise falls back to `focuser.fallback_step_size_um`.
+- `focuser.use_optical_position_action` — if true (the default), asks the
+  focuser for its true drawtube position via the `OpticalPosition` Alpaca
+  Action and renders defocus from that rather than the reported `Position`.
+  Only this project's backlash focuser simulator (below) implements it; any
+  other focuser rejects the action and `Position` is used automatically.
 - `filter_wheel.alpaca_base_url` / `device_number` — where to find an Alpaca
   filter wheel to query for the current filter's focus offset. Leave
   unreachable/unconfigured (the default) and every exposure renders exactly
@@ -128,6 +133,173 @@ discovery responder on `server.discovery_port` (default Alpaca discovery
 port 32227). Any Alpaca-aware client (N.I.N.A., SharpCap, ASCOM tools) can
 discover and connect to it as a normal camera.
 
+## Backlash focuser simulator
+
+`focuser_sim` is a second Alpaca device server in this repo: a full
+IFocuserV4 absolute focuser with **configurable mechanical backlash**, for
+reproducing and fault-finding backlash-related focus problems (e.g. an
+autofocus routine or backlash compensation in client software that lands
+off focus).
+
+```bash
+./venv/bin/python -m focuser_sim.server      # or scripts/start-focusersim.sh
+```
+
+On Windows, use `scripts\start-focusersim.ps1` / `stop-focusersim.ps1`
+instead. To start/stop it from desktop icons on either OS, see
+[Desktop start/stop icons](#desktop-startstop-icons-focuser-simulator).
+
+It listens on port **11118** by default (settings in `focuser_sim.yaml`),
+answers Alpaca discovery, and its setup page is at
+`http://localhost:11118/setup`.
+
+How backlash is modelled: the simulator tracks the **motor position** (what
+it reports as `Position`) separately from the **optical position** (where
+the drawtube really is). The drivetrain is engaged in whichever direction
+the drawtube last moved. After a direction reversal, the first
+`backlash_in_steps` (reversing to move IN, i.e. decreasing position) or
+`backlash_out_steps` (reversing to move OUT) motor steps are absorbed by the
+slack: `Position` changes, the drawtube doesn't. Reversing back before the
+slack is fully taken up undoes the partial take-up, again without moving the
+drawtube. For example, with 100 steps each way, moving 25000 → 26000 →
+25000 leaves `Position` at 25000 but the drawtube at 25100.
+
+Moves are timed (`steps_per_second`; 0 = instant): `IsMoving` is true while
+moving, `Position` updates during the move, and `Halt` stops it part-way.
+Moves outside 0..`max_step` are clamped. Temperature is a fixed config
+value; temperature compensation isn't available.
+
+The setup page shows a live view of reported vs optical position and how
+much slack has been taken up, manual move/halt/reset controls, and a table
+of recent moves with the steps each one lost to backlash. Backlash amounts
+and speed can be changed there live, without a restart.
+
+Non-standard extras are exposed as Alpaca Actions (listed in
+`SupportedActions`):
+
+| Action | Returns |
+| --- | --- |
+| `OpticalPosition` | The true drawtube position (string integer). |
+| `BacklashState` | JSON snapshot: motor/optical position, engaged direction, slack taken up. |
+| `ResetBacklash` | Re-syncs the drawtube to the motor. Parameters: `in`, `out`, or empty for `initial_engaged_direction`. |
+
+**Integration with the camera:** point the camera's `focuser.alpaca_base_url`
+at the focuser simulator (e.g. `http://localhost:11118`, or use the camera
+setup page's "Discover focusers" button). Leave `use_optical_position_action`
+on, and set `in_focus_position` in optical terms (at startup and after a
+reset, optical = `start_position`). The camera then renders defocus from
+where the drawtube really is, so a focus run that backlash spoils produces
+visibly soft stars even though the focuser *reports* the right position. The
+camera's status page and per-exposure log line show both positions.
+
+A typical fault-finding loop with a client application:
+
+1. Start the camera sim and the focuser sim; connect both from the client.
+2. Set `backlash_in_steps`/`backlash_out_steps` on the focuser setup page
+   (e.g. match what you suspect your real focuser has).
+3. Run the client's autofocus. Watch the focuser setup page's
+   *Recent moves* table: every row with non-zero *Lost* is a move whose
+   commanded distance the drawtube didn't fully travel, and *Error* shows how
+   far the reported position is from the truth at the end.
+4. Compare with the client's backlash compensation turned on/off, or with
+   different backlash amounts, to confirm whether it compensates correctly
+   (final *Error* of 0 after focus).
+
+## Desktop start/stop icons (focuser simulator)
+
+The start/stop scripts run the focuser simulator in the background (no
+terminal window), log to `run/`, and show a popup confirming the result;
+starting when it's already running just says so, and stopping only ever
+touches `focuser_sim.server` processes. `scripts/icons/` has matching
+icons (`.ico` for Windows, `.png` for Linux).
+
+Do the one-time [Setup](#setup) (create the venv and install
+requirements) first. If you later move the project folder, the icons stop
+working: delete them and repeat the steps below from the new location.
+
+### Windows 11
+
+**Scripted:** open PowerShell in the project folder and run:
+
+```powershell
+$proj = (Get-Location).Path; $shell = New-Object -ComObject WScript.Shell; foreach ($k in 'Start','Stop') { $l = $shell.CreateShortcut("$([Environment]::GetFolderPath('Desktop'))\$k Focuser Simulator.lnk"); $l.TargetPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"; $l.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$proj\scripts\$($k.ToLower())-focusersim.ps1`""; $l.WorkingDirectory = $proj; $l.IconLocation = "$proj\scripts\icons\focusersim-$($k.ToLower()).ico,0"; $l.WindowStyle = 7; $l.Save() }
+```
+
+This creates **Start Focuser Simulator** and **Stop Focuser Simulator** on
+your desktop (it finds the real desktop folder, including a
+OneDrive-synced one). Press **F5** on the desktop if they don't appear
+straight away.
+
+**By hand:**
+
+1. Right-click the desktop → **New → Shortcut**.
+2. For the location, enter (replacing `<project>` with the full path to the
+   project folder):
+   ```
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "<project>\scripts\start-focusersim.ps1"
+   ```
+3. Name it (e.g. *Start Focuser Simulator*) → **Finish**.
+4. Right-click the shortcut → **Properties → Change Icon → Browse** → pick
+   `<project>\scripts\icons\focusersim-start.ico`.
+5. Repeat with `stop-focusersim.ps1` and `focusersim-stop.ico` for the stop
+   icon.
+
+To pin either to the taskbar or Start menu: right-click it → **Show more
+options → Pin to taskbar** / **Pin to Start**.
+
+Logs: `run\focusersim.err.log` (the server's output) and
+`run\focusersim.log`.
+
+### Linux (GNOME, KDE, XFCE, etc.)
+
+The `.sh` scripts use `zenity` for their popups (`sudo apt install zenity`
+on Debian/Ubuntu/Raspberry Pi OS if it's missing). From the project
+folder, run:
+
+```bash
+PROJ="$(pwd)"; DESK="$(xdg-user-dir DESKTOP 2>/dev/null || echo "$HOME/Desktop")"; mkdir -p ~/.local/share/applications "$DESK"
+for k in start stop; do
+  f=~/.local/share/applications/focusersim-$k.desktop
+  cat > "$f" <<EOF
+[Desktop Entry]
+Type=Application
+Name=${k^} Focuser Simulator
+Comment=${k^} the ASCOM Alpaca backlash focuser simulator
+Exec="$PROJ/scripts/$k-focusersim.sh"
+Icon=$PROJ/scripts/icons/focusersim-$k.png
+Terminal=false
+Categories=Science;Astronomy;
+EOF
+  chmod +x "$f" "$PROJ/scripts/$k-focusersim.sh"
+  cp "$f" "$DESK/"
+  gio set "$DESK/focusersim-$k.desktop" metadata::trusted true 2>/dev/null || true
+done
+```
+
+This adds **Start Focuser Simulator** and **Stop Focuser Simulator** both
+to the applications menu (search for "Focuser") and to the desktop.
+
+- **GNOME / Ubuntu:** desktop icons need the *Desktop Icons NG* extension
+  (enabled by default on Ubuntu). If an icon shows as a plain file, or a
+  generic icon with a red X, right-click it → **Allow Launching**.
+- **KDE Plasma:** the first launch may ask to confirm running the file →
+  **Continue** (tick *Do not ask again*).
+- **Raspberry Pi OS / LXDE:** if double-clicking asks what to do, choose
+  **Execute**. To stop being asked: File Manager → **Edit → Preferences →
+  General → Don't ask options on launch executable file**.
+
+To add either to a dock/panel: open the applications menu, find it,
+right-click → **Add to Favorites** / **Pin to Task Manager** / **Add to
+panel** (wording varies by desktop).
+
+Logs: `run/focusersim.log`.
+
+To remove the icons:
+
+```bash
+rm ~/.local/share/applications/focusersim-{start,stop}.desktop "$(xdg-user-dir DESKTOP 2>/dev/null || echo "$HOME/Desktop")"/focusersim-{start,stop}.desktop
+```
+
 ## Testing without real hardware
 
 A minimal mock Alpaca telescope is included for testing the whole pipeline:
@@ -142,7 +314,8 @@ Point it elsewhere at any time:
 curl -X PUT "http://localhost:11111/debug/pointing?ra_hours=3.7836&dec_deg=24.1167&focal_length_mm=300"
 ```
 
-A matching mock Alpaca focuser is included for testing defocus:
+A minimal mock Alpaca focuser (no backlash; instant moves) is also included
+for testing defocus:
 
 ```bash
 ./venv/bin/python scripts/mock_focuser.py --position 15000 --step-size 2.5
