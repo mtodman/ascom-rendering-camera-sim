@@ -15,6 +15,8 @@ from . import image_synth
 from .alpaca_common import (
     CommonDeviceState,
     alpaca_error,
+    alpaca_imagebytes_error,
+    alpaca_imagebytes_response,
     alpaca_response,
     build_common_router,
     client_transaction_id,
@@ -510,18 +512,28 @@ def build_camera_router(device_number: int, device: CameraDevice) -> APIRouter:
     @cam_router.get("/imagearray")
     async def get_imagearray(request: Request):
         params = await get_params(request)
+        # Alpaca clients that support the binary transfer negotiate it via this
+        # Accept header; a large frame's JSON ImageArray body (a plain-text
+        # nested list, several bytes per pixel plus per-number parse overhead)
+        # gets slow enough to matter once the sensor has several million
+        # pixels, so real clients (N.I.N.A. included) prefer this when offered.
+        wants_bytes = "application/imagebytes" in request.headers.get("accept", "").lower()
         try:
             _require_connected(params)
             if not device.image_ready or device.image_array is None:
                 raise InvalidOperationException("No image available; call StartExposure first.")
             # Value is [x][y] per the Alpaca convention (transpose of our [row=y][col=x] array).
-            value = device.image_array.T.tolist()
+            array_xy = np.ascontiguousarray(device.image_array.T)
+            if wants_bytes:
+                return alpaca_imagebytes_response(array_xy, client_transaction_id(params))
             return alpaca_response(
-                value,
+                array_xy.tolist(),
                 client_transaction_id(params),
                 extra_fields={"Type": 2, "Rank": 2},
             )
         except Exception as exc:  # noqa: BLE001
+            if wants_bytes:
+                return alpaca_imagebytes_error(exc, client_transaction_id(params))
             return _err(exc, params)
 
     @cam_router.get("/imagearrayvariant")

@@ -13,7 +13,7 @@ server:
 
 telescope:
   # Base URL of the Alpaca telescope device server to query for pointing.
-  alpaca_base_url: "http://192.168.0.56:11112"
+  alpaca_base_url: "http://192.168.0.122:11112"
   device_number: 0
   # Used if the telescope is unreachable/not connected, or doesn't expose FocalLength/ApertureDiameter.
   fallback_ra_hours: 6.75258
@@ -27,7 +27,7 @@ telescope:
 focuser:
   # Base URL of the Alpaca focuser device server to query for focus position,
   # to simulate defocus. Leave unreachable/unconfigured to always render in focus.
-  alpaca_base_url: "http://192.168.0.56:32323"
+  alpaca_base_url: "http://192.168.0.184:11118"
   device_number: 0
   # Focuser step position that represents perfect focus for this setup - Alpaca's
   # Position property is just a raw step count with no defined zero, so this has
@@ -45,7 +45,7 @@ filter_wheel:
   # added to the focuser's defocus, so a non-parfocal filter set shifts focus
   # repeatably by filter. Leave unreachable/unconfigured for no effect
   # (offset always 0).
-  alpaca_base_url: "http://localhost:11117"
+  alpaca_base_url: "http://192.168.0.122:32323"
   device_number: 0
   request_timeout_s: 2.0
 
@@ -53,7 +53,7 @@ cover_calibrator:
   # Base URL of the Alpaca cover/calibrator device server to query for cover
   # state and calibrator brightness. Leave unreachable/unconfigured for no
   # effect (cover always treated as open, calibrator off).
-  alpaca_base_url: "http://localhost:11116"
+  alpaca_base_url: "http://192.168.0.122:32323"
   device_number: 0
   # Used if the cover/calibrator is unreachable/not connected.
   fallback_cover_closed: false
@@ -64,11 +64,14 @@ cover_calibrator:
   request_timeout_s: 2.0
 
 camera:
-  sensor_name: "Simulated CMOS 1920x1080"
+  # 6248x4176 @ 3.76um matches the Sony IMX571 sensor (as used in cameras
+  # like the ASI2600MM/QHY268M) - a larger, more realistic astro-camera
+  # sensor than the original 1920x1080 placeholder.
+  sensor_name: "Simulated CMOS 6248x4176 (IMX571-like)"
   sensor_type: "Monochrome"   # Monochrome | RGGB
   pixel_size_um: 3.76
-  num_pixels_x: 1920
-  num_pixels_y: 1080
+  num_pixels_x: 6248
+  num_pixels_y: 4176
   max_bin: 4
   can_asymmetric_bin: true
   can_fast_readout: true
@@ -99,5 +102,8 @@ camera:
   cooling_rate_c_per_s: 2.0
 
 catalog:
-  path: "data/tycho2_mag11_5.csv"
-  limit_mag: 11.5
+  # Tycho-2 plateaus hard around VTmag 13.5 (empirically confirmed: querying
+  # deeper than that returns almost no additional stars) - this is its
+  # practical depth limit, not an arbitrary choice.
+  path: "data/tycho2_mag13_5.csv"
+  limit_mag: 13.5

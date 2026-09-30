@@ -7,6 +7,7 @@ Usage:
         --duration 3 --out /tmp/preview.png
 """
 import argparse
+import struct
 import time
 
 import numpy as np
@@ -32,6 +33,31 @@ def alpaca_get(base_url: str, path: str, **params):
     return body["Value"]
 
 
+# Alpaca's binary ImageBytes transfer (see alpaca_common.py's
+# alpaca_imagebytes_response docstring for the header layout) - large frames
+# are dramatically slower to fetch and parse as JSON, so this preview script
+# uses the same negotiation real Alpaca clients (N.I.N.A. included) use.
+_IMAGEBYTES_DTYPE = {1: "<i2", 8: "<u2", 2: "<i4", 9: "<u4"}
+
+
+def alpaca_get_imagearray(base_url: str, timeout_s: float = 60.0) -> np.ndarray:
+    resp = requests.get(
+        f"{base_url}/api/v1/camera/0/imagearray",
+        headers={"Accept": "application/imagebytes"},
+        timeout=timeout_s,
+    )
+    resp.raise_for_status()
+    if "application/imagebytes" not in resp.headers.get("content-type", ""):
+        return np.array(resp.json()["Value"], dtype=np.float64)
+    body = resp.content
+    (_meta_version, error_number, _client_txn, _server_txn,
+     data_start, _image_type, xmsn_type, _rank, dim1, dim2, _dim3) = struct.unpack("<11i", body[:44])
+    if error_number != 0:
+        raise RuntimeError(f"imagearray -> ErrorNumber {error_number}: {body[44:].decode('utf-8')}")
+    flat = np.frombuffer(body, dtype=_IMAGEBYTES_DTYPE[xmsn_type], offset=data_start)
+    return flat.reshape(dim1, dim2).astype(np.float64)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base-url", default="http://localhost:11112")
@@ -48,7 +74,7 @@ def main() -> None:
             break
         time.sleep(0.2)
 
-    array = np.array(alpaca_get(args.base_url, "imagearray"), dtype=np.float64)
+    array = alpaca_get_imagearray(args.base_url)
     # ImageArray is [x][y] per Alpaca convention; transpose back to [y][x] for display.
     array = array.T
 

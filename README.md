@@ -9,9 +9,9 @@ the real patch of sky the camera is pointed at:
    exposes them).
 2. Computes the field of view and plate scale from that focal length plus
    the simulated camera's pixel size/sensor resolution.
-3. Projects real stars (Tycho-2 catalog, complete to V≈11.5) from that patch
-   of sky onto the sensor's pixel grid via a gnomonic (tangent-plane)
-   projection.
+3. Projects real stars (Tycho-2 catalog, complete to V≈13.5 — its practical
+   depth limit, see Notes below) from that patch of sky onto the sensor's
+   pixel grid via a gnomonic (tangent-plane) projection.
 4. Optionally queries a configured **Alpaca focuser** device for its current
    position and simulates defocus: geometric-optics blur from the focuser's
    offset from a configured in-focus reference position, combined with
@@ -33,12 +33,22 @@ the real patch of sky the camera is pointed at:
 No internet access is needed at runtime — the star catalog is a local CSV
 file built once by `scripts/build_catalog.py`.
 
+The `/imagearray` endpoint supports Alpaca's binary **ImageBytes** transfer
+(`Accept: application/imagebytes`) as well as the standard JSON body — real
+Alpaca clients (N.I.N.A. included) request whichever the server supports and
+prefer ImageBytes when it's available, since JSON's per-pixel text encoding
+becomes a real bottleneck once a frame has several million pixels (confirmed
+directly: at the default 6248x4176 sensor, JSON serves an ~104MB body in
+~1.7s locally, versus ~52MB in ~0.13s for ImageBytes — and JSON's client-side
+parse cost, not measured here, is usually the bigger cost in practice).
+Clients that don't send that `Accept` header keep getting JSON, unchanged.
+
 ## Setup
 
 ```bash
 python3 -m venv venv
 ./venv/bin/pip install -r requirements.txt
-./venv/bin/python scripts/build_catalog.py   # only needed once, or to refresh
+./venv/bin/python scripts/build_catalog.py --max-mag 13.5 --out data/tycho2_mag13_5.csv
 ```
 
 ## Configuration
@@ -115,7 +125,14 @@ Alternatively, edit `config.yaml` directly (restart the server afterwards):
   sensors/well depths, or to make flats saturate/not saturate as desired.
 - `camera.*` — sensor pixel size/resolution, well depth, read noise, dark
   current, seeing FWHM, and `zero_point_e_per_s_mag0` (tune this to control
-  overall brightness/exposure behavior).
+  overall brightness/exposure behavior). Defaults to 6248x4176 @ 3.76µm
+  (Sony IMX571-like, as used in cameras like the ASI2600MM/QHY268M) rather
+  than a small placeholder resolution, both for realism and because a wider
+  real FOV puts more catalog stars in frame.
+- `catalog.path` — which local CSV catalog to load; the depth actually
+  rendered is whatever magnitude that file was built with (`catalog.limit_mag`
+  is informational only — it isn't read by the rendering code, so keep it in
+  sync with `path` by hand). See "Star catalog depth" below.
 - `server.port` / `server.discovery_port` — this host already runs other
   Alpaca simulators on 11111/11112, so this project defaults to **11115**.
   The discovery responder binds with `SO_REUSEPORT` so it coexists cleanly
@@ -365,6 +382,25 @@ Run the automated smoke tests:
 ./venv/bin/python -m pytest tests/
 ```
 
+## Star catalog depth
+
+Tycho-2 plateaus hard around VTmag 13.5 — empirically confirmed by querying
+VizieR at increasing magnitude cutoffs in a test band: 40,251 stars at
+VTmag<11.5, 74,238 at <13.5, and only 74,274 at <15.5 (i.e. almost no
+additional stars beyond 13.5). That's a real property of the catalog, not a
+query bug — Tycho-2 was built as an astrometric reference catalog, not a deep
+photometric survey. `data/tycho2_mag13_5.csv` (the shipped default, ~2.43M
+stars) is as deep as this catalog usefully goes; re-running
+`build_catalog.py` with a higher `--max-mag` will not meaningfully add more.
+
+Going deeper for real (Gaia DR3 goes past mag 20) would need a different
+build script against a much larger source table — full-sky counts at G<13.5
+run to roughly 6M+ stars, versus Tycho-2's ~2.4M at the same nominal depth,
+and keep climbing steeply at fainter cutoffs. Not implemented here since it's
+a materially bigger dataset/build-time/memory commitment than a same-source
+depth increase, but the CSV schema (`ra_deg,dec_deg,vmag`) would carry over
+directly if that's ever wanted.
+
 ## Notes / simplifications
 
 - Proper motion and precession are ignored (catalog positions are used as-is,
@@ -375,6 +411,14 @@ Run the automated smoke tests:
 - Tycho-2 is known to be less reliable for the very brightest stars
   (V ≲ 2-3, satellite saturation) and in very dense/crowded fields; fainter
   stars (which dominate the catalog) are accurately positioned.
+- Star PSF size (`camera.seeing_fwhm_arcsec`, combined in quadrature with any
+  defocus) is a physically real angular size — at a fast, short-focal-length
+  scope with fine pixels, that can correspond to a FWHM of only ~2-3 pixels,
+  which is realistic but close to what some star-detection algorithms treat
+  as indistinguishable from a hot pixel or noise spike. If a client's star
+  detection is marginal, raising `camera.seeing_fwhm_arcsec` (or using a
+  longer effective focal length) gives fatter, easier-to-detect stars, the
+  same way it would on real hardware.
 - Defocus blur is computed from simple geometric optics (blur size scales
   with focuser offset ÷ focal ratio) and combined with atmospheric seeing
   in quadrature, rendered as a wider Gaussian PSF. A real defocused star's
