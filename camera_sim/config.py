@@ -85,8 +85,8 @@ class CameraConfig(BaseModel):
     sensor_name: str = "Simulated Sensor"
     sensor_type: str = "Monochrome"
     pixel_size_um: float = 3.76
-    num_pixels_x: int = 1920
-    num_pixels_y: int = 1080
+    num_pixels_x: int = 6248
+    num_pixels_y: int = 4176
     max_bin: int = 4
     can_asymmetric_bin: bool = True
     can_fast_readout: bool = True
@@ -117,8 +117,8 @@ class CameraConfig(BaseModel):
 
 
 class CatalogConfig(BaseModel):
-    path: str = "data/tycho2_mag9.csv"
-    limit_mag: float = 9.0
+    path: str = "data/tycho2_mag13_5.csv"
+    limit_mag: float = 13.5
 
 
 class Settings(BaseModel):

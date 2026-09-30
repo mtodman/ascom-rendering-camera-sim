@@ -71,6 +71,23 @@ async def get_step_size(request: Request):
     return _ok(state["step_size_um"], dict(request.query_params))
 
 
+@app.get("/api/v1/focuser/0/ismoving")
+async def get_is_moving(request: Request):
+    # Move() below is synchronous (applies the position immediately), so
+    # there's never a real in-flight move to report.
+    return _ok(False, dict(request.query_params))
+
+
+@app.get("/api/v1/focuser/0/absolute")
+async def get_absolute(request: Request):
+    return _ok(True, dict(request.query_params))
+
+
+@app.get("/api/v1/focuser/0/maxstep")
+async def get_max_step(request: Request):
+    return _ok(100000, dict(request.query_params))
+
+
 @app.put("/api/v1/focuser/0/move")
 async def put_move(request: Request):
     """Standard Alpaca IFocuser.Move(Position) - absolute, since this stub

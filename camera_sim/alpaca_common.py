@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import struct
 import time
 from typing import Any, Callable
 
+import numpy as np
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from .alpaca_errors import AlpacaError, InvalidValueException, NotConnectedException
 
@@ -95,6 +97,70 @@ def alpaca_error(exc: AlpacaError, client_txn_id: int = 0) -> JSONResponse:
         "ErrorMessage": exc.message,
     }
     return JSONResponse(body)
+
+
+# Alpaca's binary "ImageBytes" transfer format (Accept: application/imagebytes),
+# used instead of the JSON ImageArray body for large images - JSON's per-number
+# text encoding and parsing overhead becomes the dominant cost once a frame has
+# more than a few million pixels. Header layout (44 bytes, little-endian int32
+# fields) and axis order confirmed against the reference client implementation
+# (python `alpyca` package, camera.py's _build_imagedata_array/
+# _build_imagedata_nested_list_array): MetadataVersion, ErrorNumber,
+# ClientTransactionID, ServerTransactionID, DataStart, ImageElementType,
+# TransmissionElementType, Rank, Dimension1, Dimension2, Dimension3, then the
+# pixel data itself, flattened row-major over (Dimension1=NumX, Dimension2=NumY)
+# - i.e. the same [x][y] axis order already used for the JSON ImageArray body.
+_IMAGEBYTES_HEADER_FMT = "<11i"
+_IMAGEBYTES_DTYPE_CODES = {
+    np.dtype("int16"): (1, "<i2"),
+    np.dtype("uint16"): (8, "<u2"),
+    np.dtype("int32"): (2, "<i4"),
+    np.dtype("uint32"): (9, "<u4"),
+}
+
+
+def alpaca_imagebytes_response(array_xy: np.ndarray, client_txn_id: int, image_element_type: int = 2) -> Response:
+    """`array_xy` must already be in Alpaca's [x][y] axis order (i.e. the
+    transpose of a normal [row=y][col=x] image array), dtype one of
+    int16/uint16/int32/uint32. `image_element_type` is the ASCOM
+    ImageArrayElementTypes value to declare as the array's logical type
+    (independent of the possibly-more-compact on-wire transmission type),
+    matching whatever the JSON ImageArray path already declares as "Type".
+    """
+    try:
+        xmsn_type, np_dtype = _IMAGEBYTES_DTYPE_CODES[array_xy.dtype]
+    except KeyError:
+        raise ValueError(f"Unsupported ImageBytes pixel dtype: {array_xy.dtype}") from None
+    num_x, num_y = array_xy.shape
+    header = struct.pack(
+        _IMAGEBYTES_HEADER_FMT,
+        1,  # MetadataVersion
+        0,  # ErrorNumber
+        client_txn_id,
+        next_server_transaction_id(),
+        44,  # DataStart
+        image_element_type,
+        xmsn_type,
+        2,  # Rank (monochrome/single-plane)
+        num_x,
+        num_y,
+        0,  # Dimension3 (no color planes)
+    )
+    body = header + np.ascontiguousarray(array_xy, dtype=np_dtype).tobytes(order="C")
+    return Response(content=body, media_type="application/imagebytes")
+
+
+def alpaca_imagebytes_error(exc: AlpacaError, client_txn_id: int = 0) -> Response:
+    """Same 44-byte header (ErrorNumber non-zero, no pixel dimensions), with
+    the UTF-8 error message in place of pixel data - matching how the
+    reference client reads an ImageBytes error (ErrorNumber at bytes 4:8,
+    message text from byte 44 onward)."""
+    header = struct.pack(
+        _IMAGEBYTES_HEADER_FMT,
+        1, exc.error_number, client_txn_id, next_server_transaction_id(),
+        44, 0, 0, 0, 0, 0, 0,
+    )
+    return Response(content=header + exc.message.encode("utf-8"), media_type="application/imagebytes")
 
 
 class CommonDeviceState:

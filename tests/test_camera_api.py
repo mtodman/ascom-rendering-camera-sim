@@ -1,3 +1,4 @@
+import struct
 import sys
 import time
 from pathlib import Path
@@ -61,6 +62,61 @@ def test_full_exposure_lifecycle(tmp_path):
         value = body["Value"]
         assert len(value) == 200  # X dimension first
         assert len(value[0]) == 150  # Y dimension
+
+
+def test_imagearray_imagebytes_matches_json(tmp_path):
+    """A client that sends `Accept: application/imagebytes` (as real Alpaca
+    clients do to avoid the JSON ImageArray body's parse/size overhead on
+    large frames) must get back pixel-identical data to the JSON path,
+    decoded per the same header layout the reference `alpyca` client uses.
+    """
+    settings = make_settings(tmp_path / "cat.csv")
+    app = create_app(settings)
+    with TestClient(app) as client:
+        client.put(f"{BASE}/connected", data={"Connected": "true"})
+        client.put(f"{BASE}/startexposure", data={"Duration": "0.2", "Light": "true"})
+        for _ in range(50):
+            if client.get(f"{BASE}/imageready").json()["Value"]:
+                break
+            time.sleep(0.05)
+
+        json_value = client.get(f"{BASE}/imagearray").json()["Value"]
+
+        r = client.get(f"{BASE}/imagearray", headers={"Accept": "application/imagebytes"})
+        assert r.headers["content-type"].startswith("application/imagebytes")
+        body = r.content
+        (
+            metadata_version, error_number, _client_txn, _server_txn,
+            data_start, image_element_type, xmsn_element_type, rank,
+            dim1, dim2, dim3,
+        ) = struct.unpack("<11i", body[:44])
+        assert metadata_version == 1
+        assert error_number == 0
+        assert data_start == 44
+        assert image_element_type == 2  # Int32, matching the JSON path's declared Type
+        assert xmsn_element_type == 8  # UInt16 - the actual (compact) on-wire type
+        assert rank == 2
+        assert (dim1, dim2, dim3) == (200, 150, 0)
+
+        import array
+
+        pixels = array.array("H")
+        pixels.frombytes(body[data_start:])
+        for x in range(dim1):
+            row = list(pixels[x * dim2 : (x + 1) * dim2])
+            assert row == json_value[x]
+
+
+def test_imagearray_imagebytes_error_when_not_connected():
+    settings = make_settings(Path("/tmp/camsim_test_cat_bytes_err.csv"))
+    app = create_app(settings)
+    with TestClient(app) as client:
+        r = client.get(f"{BASE}/imagearray", headers={"Accept": "application/imagebytes"})
+        assert r.headers["content-type"].startswith("application/imagebytes")
+        body = r.content
+        error_number = struct.unpack("<i", body[4:8])[0]
+        assert error_number == 0x407
+        assert body[44:].decode("utf-8") == "Camera is not connected."
 
 
 def test_management_api():
