@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block title %}Focuser Simulator Setup{% endblock %}
+{% block subtitle %}Alpaca Backlash Focuser Simulator{% endblock %}
+{% block content %}
+<style>
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px 20px; }
+  .stat .k { font-size: 0.78rem; color: var(--muted); }
+  .stat .v { font-size: 1.25rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat .v.warn { color: var(--warn-text); }
+  .gauge { margin-top: 16px; }
+  .gauge .track { height: 12px; background: #e5e7eb; border-radius: 6px; overflow: hidden; }
+  .gauge .fill { height: 100%; width: 0; background: var(--accent); transition: width 0.1s linear; }
+  .gauge .label { font-size: 0.82rem; color: var(--muted); margin-top: 5px; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .controls input[type=number] { width: 120px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; }
+  .controls .sep { width: 1px; height: 28px; background: var(--border); margin: 0 4px; }
+  .btn.danger { background: #dc2626; }
+  .btn.danger:hover { background: #b91c1c; }
+  table.hist { width: 100%; border-collapse: collapse; font-size: 0.83rem; font-variant-numeric: tabular-nums; }
+  table.hist th, table.hist td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--border); }
+  table.hist th:first-child, table.hist td:first-child, table.hist th:last-child, table.hist td:last-child { text-align: left; }
+  table.hist th { color: var(--muted); font-weight: 500; }
+  table.hist td.lost { font-weight: 600; color: var(--warn-text); }
+  .hist-wrap { overflow-x: auto; }
+</style>
+
+{% if saved %}
+<div class="banner ok">Settings saved.{% if restart_needed %} Server/network changes will take effect after you restart the simulator.{% endif %}</div>
+{% endif %}
+{% if errors %}
+<div class="banner err">Couldn't save settings:
+  <ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2>Live status</h2>
+  <p class="desc">Position is what Alpaca clients see; Optical is where the drawtube really is (what the camera simulator renders from).</p>
+  <div class="stat-grid">
+    <div class="stat"><div class="k">Position (reported)</div><div class="v" id="s-motor">-</div></div>
+    <div class="stat"><div class="k">Optical (true)</div><div class="v" id="s-optical">-</div></div>
+    <div class="stat"><div class="k">Error (reported &minus; optical)</div><div class="v" id="s-offset">-</div></div>
+    <div class="stat"><div class="k">Moving</div><div class="v" id="s-moving">-</div></div>
+    <div class="stat"><div class="k">Target</div><div class="v" id="s-target">-</div></div>
+    <div class="stat"><div class="k">Engaged direction</div><div class="v" id="s-engaged">-</div></div>
+    <div class="stat"><div class="k">Alpaca client connected</div><div class="v" id="s-connected">-</div></div>
+  </div>
+  <div class="gauge">
+    <div class="track"><div class="fill" id="g-fill"></div></div>
+    <div class="label" id="g-label">-</div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Manual control</h2>
+  <p class="desc">Drives the focuser directly (no Alpaca client needed). Watch the gauge: after a reversal, the reported position changes while the optical position doesn't, until the slack is taken up.</p>
+  <div class="controls">
+    <button type="button" class="btn secondary" data-rel="-1000">&minus;1000</button>
+    <button type="button" class="btn secondary" data-rel="-100">&minus;100</button>
+    <button type="button" class="btn secondary" data-rel="-10">&minus;10</button>
+    <button type="button" class="btn secondary" data-rel="10">+10</button>
+    <button type="button" class="btn secondary" data-rel="100">+100</button>
+    <button type="button" class="btn secondary" data-rel="1000">+1000</button>
+    <span class="sep"></span>
+    <input type="number" id="abs-pos" step="1" placeholder="Position">
+    <button type="button" class="btn secondary" id="btn-goto">Move to</button>
+    <span class="sep"></span>
+    <button type="button" class="btn danger" id="btn-halt">Halt</button>
+    <button type="button" class="btn secondary" id="btn-reset" title="Re-sync the drawtube to the motor, slack taken up in the configured initial direction">Reset backlash</button>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Recent moves</h2>
+  <p class="desc">Lost = motor steps that didn't move the drawtube (absorbed by backlash).</p>
+  <div class="hist-wrap">
+    <table class="hist">
+      <thead><tr><th>Time</th><th>Requested</th><th>Position</th><th>Optical</th><th>Lost</th><th>Outcome</th></tr></thead>
+      <tbody id="hist-body"><tr><td colspan="6">No moves yet.</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<form method="post">
+{% for section in sections %}
+  <div class="panel">
+    <h2>{{ section.title }}</h2>
+    {% if section.desc %}<p class="desc">{{ section.desc }}</p>{% endif %}
+    <div class="field-grid">
+    {% for f in section.fields %}
+      {% if f.input_type == "checkbox" %}
+      <div class="field checkbox">
+        <input type="checkbox" id="{{ section.id }}_{{ f.name }}" name="{{ section.id }}_{{ f.name }}" {% if f.value %}checked{% endif %}>
+        <label for="{{ section.id }}_{{ f.name }}">{{ f.label }}</label>
+      </div>
+      {% else %}
+      <div class="field">
+        <label for="{{ section.id }}_{{ f.name }}">{{ f.label }}</label>
+        <input type="{{ f.input_type }}" {% if f.step %}step="{{ f.step }}"{% endif %}
+               id="{{ section.id }}_{{ f.name }}" name="{{ section.id }}_{{ f.name }}" value="{{ f.value }}">
+      </div>
+      {% endif %}
+    {% endfor %}
+    </div>
+  </div>
+{% endfor %}
+  <div class="actions">
+    <button type="submit">Save settings</button>
+  </div>
+</form>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let last = null;
+
+function fmt(v) { return (v === null || v === undefined) ? '-' : v; }
+
+function render(data) {
+  const s = data.status;
+  last = s;
+  $('s-motor').textContent = s.motor_position;
+  $('s-optical').textContent = s.optical_position;
+  $('s-offset').textContent = (s.offset_steps > 0 ? '+' : '') + s.offset_steps;
+  $('s-offset').classList.toggle('warn', s.offset_steps !== 0);
+  $('s-moving').textContent = s.is_moving ? 'Yes' : 'No';
+  $('s-target').textContent = s.target;
+  $('s-engaged').textContent = s.engaged_direction.toUpperCase();
+  $('s-connected').textContent = s.connected ? 'Yes' : 'No';
+
+  const reverse = s.engaged_direction === 'out' ? 'IN' : 'OUT';
+  const total = s.reversal_backlash_steps;
+  const pct = total > 0 ? (100 * s.takeup_steps / total) : 0;
+  $('g-fill').style.width = pct + '%';
+  $('g-label').textContent = total > 0
+    ? `Slack taken up toward ${reverse}: ${s.takeup_steps} / ${total} steps. A move ${reverse} loses the next ${total - s.takeup_steps} steps; a move ${s.engaged_direction.toUpperCase()} loses ${s.takeup_steps}.`
+    : `No backlash configured for reversing ${reverse}.`;
+
+  const body = $('hist-body');
+  if (!data.history.length) return;
+  body.innerHTML = '';
+  for (const r of data.history) {
+    const tr = document.createElement('tr');
+    const pos = r.end_position === null ? `${r.start_position} &rarr; &hellip;` : `${r.start_position} &rarr; ${r.end_position}`;
+    const opt = r.end_optical === null ? `${r.start_optical} &rarr; &hellip;` : `${r.start_optical} &rarr; ${r.end_optical}`;
+    const req = r.requested === r.target ? r.requested : `${r.requested} (clamped ${r.target})`;
+    tr.innerHTML = `<td>${r.started}</td><td>${req}</td><td>${pos}</td><td>${opt}</td>` +
+      `<td class="${r.lost_steps ? 'lost' : ''}">${fmt(r.lost_steps)}</td><td>${r.outcome}</td>`;
+    body.appendChild(tr);
+  }
+}
+
+async function poll() {
+  try {
+    const resp = await fetch('status');
+    render(await resp.json());
+  } catch (e) { /* server restarting - keep polling */ }
+  setTimeout(poll, 250);
+}
+
+async function control(path) {
+  await fetch('control/' + path, { method: 'POST' });
+}
+
+document.querySelectorAll('[data-rel]').forEach((b) => b.addEventListener('click', () => {
+  if (!last) return;
+  // Relative to the current target, so repeated clicks during a move accumulate.
+  control('move?position=' + (last.target + parseInt(b.dataset.rel, 10)));
+}));
+$('btn-goto').addEventListener('click', () => {
+  const v = parseInt($('abs-pos').value, 10);
+  if (!Number.isNaN(v)) control('move?position=' + v);
+});
+$('btn-halt').addEventListener('click', () => control('halt'));
+$('btn-reset').addEventListener('click', () => control('reset'));
+
+poll();
+</script>
+{% endblock %}

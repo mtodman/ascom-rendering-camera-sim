@@ -1,0 +1,30 @@
+# Configuration for the ASCOM Alpaca backlash focuser simulator
+# (python -m focuser_sim.server). Everything here is also editable live from
+# its web setup page: http://localhost:11118/setup
+
+server:
+  host: "0.0.0.0"
+  # 11111-11117 are used by the camera simulator and its test stubs.
+  port: 11118
+  discovery_port: 32227
+  server_name: "Alpaca Backlash Focuser Simulator"
+  manufacturer: "DIY"
+  manufacturer_version: "1.0"
+  location: "Simulated Observatory"
+
+focuser:
+  # Steps absorbed by the drivetrain (drawtube doesn't move) when the focuser
+  # reverses to move IN (decreasing Position) after last moving OUT...
+  backlash_in_steps: 100
+  # ...and when it reverses to move OUT (increasing Position) after last moving IN.
+  backlash_out_steps: 100
+  # Direction the drivetrain is engaged in at startup/reset ("in" or "out").
+  initial_engaged_direction: "out"
+  start_position: 25000
+  max_step: 50000
+  max_increment: 50000
+  # Microns per step, reported as StepSize.
+  step_size_um: 20.0
+  # Motor speed; 0 makes every move complete instantly.
+  steps_per_second: 500.0
+  temperature_c: 10.0

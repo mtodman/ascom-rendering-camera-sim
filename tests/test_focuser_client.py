@@ -1,15 +1,20 @@
 import json
+import socket
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
+import requests
 
 from camera_sim.config import FocuserConfig
 from camera_sim.focuser_client import FocuserClient
+from focuser_sim.config import FocuserSimConfig, FocuserSimServerConfig, FocuserSimSettings
+from focuser_sim.server import create_app as create_focuser_app
 
 # ASCOM's Focuser.StepSize is specified in microns already (unlike
 # Telescope.FocalLength/ApertureDiameter, which are in meters) - no unit
@@ -123,3 +128,62 @@ def test_fallback_is_zero_defocus_when_focuser_unreachable():
     assert state.position == 12345  # reported as sitting exactly at in-focus
     assert defocus_um == 0.0
     assert source == "fallback"
+
+
+def test_falls_back_to_reported_position_without_optical_action(fake_focuser_server):
+    """The fake server doesn't implement PUT /action (like most real
+    drivers), so the reported Position must be used."""
+    cfg = FocuserConfig(alpaca_base_url=f"http://127.0.0.1:{fake_focuser_server}", in_focus_position=15000)
+    state = FocuserClient(cfg).get_state()
+
+    assert state.optical is False
+    assert state.position == state.reported_position == 15000
+
+
+@pytest.fixture
+def running_focuser_sim():
+    """A real focuser_sim server on a free port, with 100 steps of backlash
+    each way and instant moves."""
+    import uvicorn
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    settings = FocuserSimSettings(
+        server=FocuserSimServerConfig(port=port, discovery_port=0),
+        focuser=FocuserSimConfig(start_position=25000, backlash_in_steps=100, backlash_out_steps=100,
+                                 step_size_um=2.0, steps_per_second=0),
+    )
+    server = uvicorn.Server(uvicorn.Config(create_focuser_app(settings), host="127.0.0.1", port=port,
+                                           log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 10
+    while not server.started:
+        assert time.monotonic() < deadline
+        time.sleep(0.05)
+    yield f"http://127.0.0.1:{port}"
+    server.should_exit = True
+    thread.join(timeout=5)
+
+
+def test_defocus_uses_optical_position_from_focuser_sim(running_focuser_sim):
+    base = f"{running_focuser_sim}/api/v1/focuser/0"
+    requests.put(f"{base}/connected", data={"Connected": "true"}, timeout=2)
+    # Overshoot out, then come back in to "focus" - the classic move that
+    # backlash spoils: the motor is back at 25000, the drawtube stops 100
+    # steps short at 25100.
+    requests.put(f"{base}/move", data={"Position": "25500"}, timeout=2)
+    requests.put(f"{base}/move", data={"Position": "25000"}, timeout=2)
+
+    cfg = FocuserConfig(alpaca_base_url=running_focuser_sim, in_focus_position=25000)
+    client = FocuserClient(cfg)
+    state = client.get_state()
+    assert state.reported_position == 25000
+    assert state.optical is True
+    assert state.position == 25100
+    assert client.defocus_um_for(state) == 200.0  # 100 steps * 2um
+
+    cfg.use_optical_position_action = False
+    defocus_um, _ = client.get_defocus_um()
+    assert defocus_um == 0.0

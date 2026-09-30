@@ -25,6 +25,11 @@
       </span>
     </div>
     <div><span class="k">Focuser:</span> <span class="v">{{ status.focuser_url }}</span></div>
+    <div><span class="k">Focuser position:</span>
+      <span class="v">
+        {{ status.focuser_reported_position }} reported{% if status.focuser_optical_position is not none %}, {{ status.focuser_optical_position }} optical{% endif %}
+      </span>
+    </div>
     <div><span class="k">Defocus:</span> <span class="v">{{ status.focuser_defocus_um }}&micro;m</span></div>
     <div><span class="k">Focus source:</span>
       <span class="v">

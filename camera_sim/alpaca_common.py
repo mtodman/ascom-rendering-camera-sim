@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import time
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -142,7 +142,19 @@ class CommonDeviceState:
         return self._connecting
 
 
-def build_common_router(prefix: str, device_number: int, state: CommonDeviceState) -> APIRouter:
+def build_common_router(
+    prefix: str,
+    device_number: int,
+    state: CommonDeviceState,
+    action_handler: Callable[[str, str], str] | None = None,
+    extra_device_state: Callable[[], list[dict[str, Any]]] | None = None,
+) -> APIRouter:
+    """`action_handler(action, parameters) -> str`, if given, services PUT
+    /action for the names in `state.supported_actions` (raising an
+    AlpacaError to report failure); without it every Action is rejected.
+    `extra_device_state()`, if given, appends device-specific entries to
+    DeviceState after the common Connected entry.
+    """
     router = APIRouter(prefix=f"{prefix}/{device_number}")
 
     @router.get("/connected")
@@ -212,6 +224,13 @@ def build_common_router(prefix: str, device_number: int, state: CommonDeviceStat
         from .alpaca_errors import ActionNotImplementedException
 
         action = find_param(params, "Action") or ""
+        supported = {a.lower() for a in state.supported_actions}
+        if action_handler is not None and action.lower() in supported:
+            try:
+                value = action_handler(action, find_param(params, "Parameters") or "")
+            except AlpacaError as exc:
+                return alpaca_error(exc, client_transaction_id(params))
+            return alpaca_response(value, client_transaction_id(params))
         return alpaca_error(
             ActionNotImplementedException(f"Action '{action}' is not supported."),
             client_transaction_id(params),
@@ -244,6 +263,8 @@ def build_common_router(prefix: str, device_number: int, state: CommonDeviceStat
         value = [
             {"Name": "Connected", "Value": state.connected},
         ]
+        if extra_device_state is not None:
+            value.extend(extra_device_state())
         return alpaca_response(value, client_transaction_id(params))
 
     return router
