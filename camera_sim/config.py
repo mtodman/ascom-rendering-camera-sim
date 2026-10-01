@@ -103,7 +103,8 @@ class CameraConfig(BaseModel):
     offset_min: int = 0
     offset_max: int = 100
     offset_default: int = 0
-    seeing_fwhm_arcsec: float = 2.5
+    # See config.yaml for why 3.5" rather than a sharper value.
+    seeing_fwhm_arcsec: float = 3.5
     zero_point_e_per_s_mag0: float = 5.0e7
     rotation_deg: float = 0.0
     flip_x: bool = False

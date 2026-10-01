@@ -37,6 +37,9 @@ focuser:
   # Used if the focuser doesn't expose StepSize.
   fallback_step_size_um: 5.0
   use_focuser_step_size: true
+  # Render defocus from the focuser's true drawtube position (the backlash
+  # focuser simulator's OpticalPosition action) when it offers one.
+  use_optical_position_action: true
   request_timeout_s: 2.0
 
 filter_wheel:
@@ -88,7 +91,11 @@ camera:
   offset_min: 0
   offset_max: 100
   offset_default: 0
-  seeing_fwhm_arcsec: 2.5
+  # 3.5" rather than a sharper 2.5": at this setup's ~1.94"/px, 2.5" seeing puts
+  # in-focus stars at an HFR of ~0.6 px - right at the size some clients' star
+  # detection treats as hot pixels (NiteOpps rejected about half the stars at
+  # best focus). 3.5" keeps in-focus stars at ~0.9 px HFR.
+  seeing_fwhm_arcsec: 3.5
   # Electrons/second collected at the sensor for a mag-0 star through the full aperture.
   zero_point_e_per_s_mag0: 5.0e7
   rotation_deg: 0.0
