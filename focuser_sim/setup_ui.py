@@ -40,10 +40,9 @@ def build_setup_router(
             {
                 "id": "focuser",
                 "title": "Focuser & backlash",
-                "desc": "Applied immediately, no restart needed. Backlash In = steps absorbed (drawtube "
-                "doesn't move) when reversing to move IN (decreasing position); Backlash Out = the same "
-                "when reversing to move OUT. Start Position/Initial Engaged Direction apply at startup "
-                "and on Reset.",
+                "desc": "Applied immediately, no restart needed. Backlash Steps = the drivetrain's slack: "
+                "motor steps absorbed (drawtube doesn't move) whenever the focuser reverses direction, "
+                "either way. Start Position/Initial Engaged Direction apply at startup and on Reset.",
                 "fields": describe_fields(settings.focuser),
             },
             {

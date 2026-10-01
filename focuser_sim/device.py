@@ -72,8 +72,7 @@ class FocuserDevice:
         self.cfg = cfg
         self.model = BacklashModel(
             cfg.start_position,
-            cfg.backlash_in_steps,
-            cfg.backlash_out_steps,
+            cfg.backlash_steps,
             parse_direction(cfg.initial_engaged_direction),
         )
         self.target = self.model.motor
@@ -94,7 +93,7 @@ class FocuserDevice:
     # ---- config ----------------------------------------------------------------------
     def apply_config(self) -> None:
         """Re-reads self.cfg after the setup UI changed it in place."""
-        self.model.set_backlash(self.cfg.backlash_in_steps, self.cfg.backlash_out_steps)
+        self.model.set_backlash(self.cfg.backlash_steps)
 
     # ---- motion ----------------------------------------------------------------------
     def move(self, requested: int) -> None:

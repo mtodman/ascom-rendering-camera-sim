@@ -143,7 +143,7 @@ def test_falls_back_to_reported_position_without_optical_action(fake_focuser_ser
 @pytest.fixture
 def running_focuser_sim():
     """A real focuser_sim server on a free port, with 100 steps of backlash
-    each way and instant moves."""
+    and instant moves."""
     import uvicorn
 
     with socket.socket() as s:
@@ -151,7 +151,7 @@ def running_focuser_sim():
         port = s.getsockname()[1]
     settings = FocuserSimSettings(
         server=FocuserSimServerConfig(port=port, discovery_port=0),
-        focuser=FocuserSimConfig(start_position=25000, backlash_in_steps=100, backlash_out_steps=100,
+        focuser=FocuserSimConfig(start_position=25000, backlash_steps=100,
                                  step_size_um=2.0, steps_per_second=0),
     )
     server = uvicorn.Server(uvicorn.Config(create_focuser_app(settings), host="127.0.0.1", port=port,

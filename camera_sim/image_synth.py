@@ -51,6 +51,67 @@ def _splat_gaussian(image: np.ndarray, x0: float, y0: float, flux: float, sigma_
     image[yi0:yi1, xi0:xi1] += flux * (psf / norm)
 
 
+# Above this PSF sigma (px), stars are rendered by _render_blurred_stars
+# instead of one _splat_gaussian each: a splat's cost grows with sigma^2,
+# and a badly defocused star (sigma in the hundreds of px) made a single
+# full-frame exposure take tens of seconds - long enough for clients to time
+# the exposure out.
+DIRECT_SPLAT_MAX_SIGMA_PX = 8.0
+
+
+def _render_blurred_stars(
+    image: np.ndarray, x_px: np.ndarray, y_px: np.ndarray, fluxes: np.ndarray, sigma_px: float
+) -> None:
+    """Adds Gaussian-blurred stars to `image` in time roughly independent of
+    sigma and star count: deposits every star's flux (bilinearly) onto a grid
+    downsampled by `b`, blurs that grid once with an FFT Gaussian at sigma/b
+    (>= 4 coarse px, so the result is smooth on the coarse grid), then
+    bilinearly interpolates back up. Flux is conserved; the coarse grid is
+    zero-padded by 4 sigma so blur from stars just outside the frame still
+    reaches it and the FFT's wrap-around doesn't fold light across edges.
+    """
+    h, w = image.shape
+    b = max(1, int(sigma_px // 4))
+    sigma_c = sigma_px / b
+    pad = int(np.ceil(4 * sigma_c))
+    hc = -(-h // b) + 2 * pad
+    wc = -(-w // b) + 2 * pad
+
+    # Star positions use pixel-edge coordinates (pixel i spans [i, i+1), see
+    # _splat_gaussian); coarse pixel j spans [j*b, (j+1)*b) with its center
+    # at continuous coarse index j.
+    u = x_px / b - 0.5 + pad
+    v = y_px / b - 0.5 + pad
+    i0 = np.floor(u).astype(np.int64)
+    j0 = np.floor(v).astype(np.int64)
+    fu = u - i0
+    fv = v - j0
+    coarse = np.zeros((hc, wc), dtype=np.float64)
+    for dj, wj in ((0, 1.0 - fv), (1, fv)):
+        for di, wi in ((0, 1.0 - fu), (1, fu)):
+            jj, ii = j0 + dj, i0 + di
+            ok = (jj >= 0) & (jj < hc) & (ii >= 0) & (ii < wc)
+            np.add.at(coarse, (jj[ok], ii[ok]), (fluxes * wj * wi)[ok])
+
+    fy = np.fft.fftfreq(hc)[:, None]
+    fx = np.fft.rfftfreq(wc)[None, :]
+    transfer = np.exp(-2.0 * (np.pi * sigma_c) ** 2 * (fy * fy + fx * fx))
+    coarse = np.fft.irfft2(np.fft.rfft2(coarse) * transfer, s=coarse.shape)
+
+    # Back to full resolution: fine pixel center i+0.5 sits at continuous
+    # coarse index (i+0.5)/b - 0.5 (+pad). Each coarse value is flux per
+    # coarse pixel, i.e. b*b fine pixels' worth.
+    def _axis(n: int) -> tuple[np.ndarray, np.ndarray]:
+        c = (np.arange(n) + 0.5) / b - 0.5 + pad
+        k = np.floor(c).astype(np.int64)
+        return k, c - k
+
+    ky, ty = _axis(h)
+    kx, tx = _axis(w)
+    rows = coarse[ky] * (1.0 - ty)[:, None] + coarse[ky + 1] * ty[:, None]
+    image += (rows[:, kx] * (1.0 - tx) + rows[:, kx + 1] * tx) / (b * b)
+
+
 def render_frame(
     stars: ProjectedStars,
     cam: CameraConfig,
@@ -86,10 +147,12 @@ def render_frame(
         gain_factor = 1.0 + (gain / max(1, cam.gain_max)) * 0.5
         flux0 = cam.zero_point_e_per_s_mag0 * exposure_s * gain_factor
         fluxes = flux0 * np.power(10.0, -0.4 * stars.vmag)
-        for x0, y0, flux in zip(stars.x_px, stars.y_px, fluxes):
-            if flux < 0.5:
-                continue
-            _splat_gaussian(image_e, x0, y0, flux, sigma_px)
+        keep = fluxes >= 0.5
+        if sigma_px > DIRECT_SPLAT_MAX_SIGMA_PX:
+            _render_blurred_stars(image_e, stars.x_px[keep], stars.y_px[keep], fluxes[keep], sigma_px)
+        else:
+            for x0, y0, flux in zip(stars.x_px[keep], stars.y_px[keep], fluxes[keep]):
+                _splat_gaussian(image_e, x0, y0, flux, sigma_px)
 
     # Dark current scales with temperature: simple doubling every 6 degC above -20C reference.
     temp_factor = 2.0 ** ((ccd_temperature_c - (-20.0)) / 6.0)

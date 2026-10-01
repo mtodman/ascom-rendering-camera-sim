@@ -172,14 +172,21 @@ answers Alpaca discovery, and its setup page is at
 
 How backlash is modelled: the simulator tracks the **motor position** (what
 it reports as `Position`) separately from the **optical position** (where
-the drawtube really is). The drivetrain is engaged in whichever direction
-the drawtube last moved. After a direction reversal, the first
-`backlash_in_steps` (reversing to move IN, i.e. decreasing position) or
-`backlash_out_steps` (reversing to move OUT) motor steps are absorbed by the
-slack: `Position` changes, the drawtube doesn't. Reversing back before the
-slack is fully taken up undoes the partial take-up, again without moving the
-drawtube. For example, with 100 steps each way, moving 25000 → 26000 →
-25000 leaves `Position` at 25000 but the drawtube at 25100.
+the drawtube really is). Backlash is a single gap (slack) of
+`backlash_steps` in the drivetrain, which is engaged in whichever direction
+the drawtube last moved. After a direction reversal, in either direction,
+the first `backlash_steps` motor steps are absorbed by the slack: `Position`
+changes, the drawtube doesn't. Reversing back before the slack is fully
+taken up undoes the partial take-up, again without moving the drawtube. For
+example, with 100 steps of backlash, moving 25000 → 26000 → 25000 leaves
+`Position` at 25000 but the drawtube at 25100. However many reversals
+happen, the drawtube is never more than `backlash_steps` from `Position`.
+
+(Earlier versions had separate `backlash_in_steps`/`backlash_out_steps`.
+Unequal values made the drawtube creep further from `Position` by the
+difference on every out-and-back cycle, without limit — something no real
+drivetrain does. Old config files still load: the larger of the two becomes
+`backlash_steps`, and the old keys are dropped on the next save.)
 
 Moves are timed (`steps_per_second`; 0 = instant): `IsMoving` is true while
 moving, `Position` updates during the move, and `Halt` stops it part-way.
@@ -212,8 +219,8 @@ camera's status page and per-exposure log line show both positions.
 A typical fault-finding loop with a client application:
 
 1. Start the camera sim and the focuser sim; connect both from the client.
-2. Set `backlash_in_steps`/`backlash_out_steps` on the focuser setup page
-   (e.g. match what you suspect your real focuser has).
+2. Set `backlash_steps` on the focuser setup page (e.g. match what you
+   suspect your real focuser has).
 3. Run the client's autofocus. Watch the focuser setup page's
    *Recent moves* table: every row with non-zero *Lost* is a move whose
    commanded distance the drawtube didn't fully travel, and *Error* shows how
@@ -425,4 +432,8 @@ directly if that's ever wanted.
   PSF is closer to a disk (or an annulus, with a central obstruction) than
   a Gaussian, but this is a standard simplification for this purpose — it
   gives a smooth, monotonic FWHM/HFD-vs-focuser-position curve, which is
-  what autofocus routines actually need to converge on.
+  what autofocus routines actually need to converge on. Badly defocused stars
+  (PSF sigma above 8 px) are rendered by blurring all of them at once on a
+  downsampled grid via FFT rather than star by star, so even a far-out-of-
+  focus full frame renders in about a second instead of tens of seconds
+  (which used to be long enough for clients to time the exposure out).

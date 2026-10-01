@@ -68,8 +68,8 @@ def create_app(settings: FocuserSimSettings | None = None, config_path: Path | N
         if settings.server.discovery_port:
             transport = await start_discovery_server(settings.server.discovery_port, settings.server.port)
         logger.info(
-            "Focuser simulator ready: position=%d, backlash in=%d out=%d steps, %.0f steps/s",
-            device.model.motor, settings.focuser.backlash_in_steps, settings.focuser.backlash_out_steps,
+            "Focuser simulator ready: position=%d, backlash=%d steps, %.0f steps/s",
+            device.model.motor, settings.focuser.backlash_steps,
             settings.focuser.steps_per_second,
         )
         yield

@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from ruamel.yaml.comments import CommentedMap
 
 from camera_sim.config import REPO_ROOT, ServerConfig, _yaml_rt, save_sections_yaml
@@ -17,13 +17,15 @@ class FocuserSimServerConfig(ServerConfig):
     server_name: str = "Alpaca Backlash Focuser Simulator"
 
 
+# Pre-single-gap config keys, migrated by FocuserSimConfig on load and
+# dropped from the YAML file on the next save.
+LEGACY_BACKLASH_KEYS = ("backlash_in_steps", "backlash_out_steps")
+
+
 class FocuserSimConfig(BaseModel):
-    # Steps lost when the focuser reverses to move IN (decreasing Position)
-    # after last moving OUT - the drawtube stays put while these are absorbed.
-    backlash_in_steps: int = Field(default=0, ge=0)
-    # Steps lost when the focuser reverses to move OUT (increasing Position)
-    # after last moving IN.
-    backlash_out_steps: int = Field(default=0, ge=0)
+    # Size of the drivetrain's slack: the motor steps absorbed (drawtube stays
+    # put) whenever the focuser reverses direction, in either direction.
+    backlash_steps: int = Field(default=0, ge=0)
     # Direction the drivetrain is engaged in at startup/reset, i.e. the
     # direction the drawtube is assumed to have last moved.
     initial_engaged_direction: Literal["in", "out"] = "out"
@@ -36,12 +38,29 @@ class FocuserSimConfig(BaseModel):
     steps_per_second: float = Field(default=500.0, ge=0)
     temperature_c: float = 10.0
 
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_backlash(cls, data):
+        # Older configs had separate IN/OUT amounts; one physical gap can't
+        # lose different amounts each way (see backlash.py), so the larger
+        # of the two becomes the gap.
+        if isinstance(data, dict) and "backlash_steps" not in data:
+            legacy = [data[k] for k in LEGACY_BACKLASH_KEYS if data.get(k) is not None]
+            if legacy:
+                data = {k: v for k, v in data.items() if k not in LEGACY_BACKLASH_KEYS}
+                data["backlash_steps"] = max(int(v) for v in legacy)
+        return data
+
 
 class FocuserSimSettings(BaseModel):
     server: FocuserSimServerConfig = FocuserSimServerConfig()
     focuser: FocuserSimConfig = FocuserSimConfig()
 
     def save(self, path: Path, raw: CommentedMap | None = None) -> None:
+        focuser_raw = raw.get("focuser") if raw is not None else None
+        if focuser_raw is not None:
+            for key in LEGACY_BACKLASH_KEYS:
+                focuser_raw.pop(key, None)
         save_sections_yaml(self, path, raw)
 
 
