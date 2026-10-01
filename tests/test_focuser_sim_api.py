@@ -83,8 +83,8 @@ def test_halt_stops_part_way(tmp_path):
 
 
 def test_backlash_visible_through_optical_position_action(tmp_path):
-    with TestClient(make_app(tmp_path, start_position=25000, backlash_in_steps=100,
-                             backlash_out_steps=100, steps_per_second=0)) as client:
+    with TestClient(make_app(tmp_path, start_position=25000, backlash_steps=100,
+                             steps_per_second=0)) as client:
         connect(client)
         client.put(f"{BASE}/move", data={"Position": "25500"})
         client.put(f"{BASE}/move", data={"Position": "25000"})
@@ -129,16 +129,16 @@ def test_setup_page_and_live_backlash_change(tmp_path):
     with TestClient(app) as client:
         r = client.get("/setup/v1/focuser/0/setup")
         assert r.status_code == 200
-        assert "Backlash In Steps" in r.text
+        assert "Backlash Steps" in r.text
 
         form = {f"focuser_{k}": str(v) for k, v in FocuserSimConfig().model_dump().items()}
-        form.update(focuser_backlash_in_steps="250", focuser_steps_per_second="0")
+        form.update(focuser_backlash_steps="250", focuser_steps_per_second="0")
         server_cfg = FocuserSimServerConfig(port=0, discovery_port=0)
         form.update({f"server_{k}": str(v) for k, v in server_cfg.model_dump().items()})
         r = client.post("/setup/v1/focuser/0/setup", data=form)
         assert "Settings saved" in r.text
-        assert device.model.backlash[-1] == 250
-        assert yaml.safe_load(config_path.read_text())["focuser"]["backlash_in_steps"] == 250
+        assert device.model.backlash == 250
+        assert yaml.safe_load(config_path.read_text())["focuser"]["backlash_steps"] == 250
 
         client.post("/setup/v1/focuser/0/control/move?position=24000")
         status = client.get("/setup/v1/focuser/0/status").json()

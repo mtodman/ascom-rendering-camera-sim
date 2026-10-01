@@ -13,18 +13,16 @@ server:
   location: "Simulated Observatory"
 
 focuser:
-  # Steps absorbed by the drivetrain (drawtube doesn't move) when the focuser
-  # reverses to move IN (decreasing Position) after last moving OUT...
-  backlash_in_steps: 100
-  # ...and when it reverses to move OUT (increasing Position) after last moving IN.
-  backlash_out_steps: 100
+  # The drivetrain's slack: motor steps absorbed (the drawtube doesn't move)
+  # whenever the focuser reverses direction, in either direction.
+  backlash_steps: 100
   # Direction the drivetrain is engaged in at startup/reset ("in" or "out").
   initial_engaged_direction: "out"
-  start_position: 25000
+  start_position: 25480
   max_step: 50000
   max_increment: 50000
   # Microns per step, reported as StepSize.
-  step_size_um: 20.0
+  step_size_um: 5.0
   # Motor speed; 0 makes every move complete instantly.
   steps_per_second: 500.0
   temperature_c: 10.0

@@ -167,3 +167,54 @@ def test_calibrator_gated_by_light_flag():
     )
 
     assert frame.max() == 0.0
+
+
+def _moments(img: np.ndarray) -> tuple[float, float, float, float]:
+    y, x = np.indices(img.shape) + 0.5
+    total = img.sum()
+    cx, cy = (img * x).sum() / total, (img * y).sum() / total
+    return total, cx, cy, float(np.sqrt((img * (x - cx) ** 2).sum() / total))
+
+
+@pytest.mark.parametrize("sigma_px", [8.5, 30.0, 75.0])
+def test_blurred_star_renderer_matches_direct_splat(sigma_px):
+    """The fast renderer used for badly defocused stars must agree with the
+    exact per-star Gaussian: same flux, same centroid, ~same width."""
+    from camera_sim.image_synth import _render_blurred_stars, _splat_gaussian
+
+    x0, y0, flux = 401.37, 287.81, 1e6
+    exact = np.zeros((600, 800))
+    _splat_gaussian(exact, x0, y0, flux, sigma_px)
+    fast = np.zeros((600, 800))
+    _render_blurred_stars(fast, np.array([x0]), np.array([y0]), np.array([flux]), sigma_px)
+
+    t_exact, cx_exact, cy_exact, w_exact = _moments(exact)
+    t_fast, cx_fast, cy_fast, w_fast = _moments(fast)
+    assert t_fast == pytest.approx(t_exact, rel=1e-3)
+    assert (cx_fast, cy_fast) == pytest.approx((cx_exact, cy_exact), abs=0.05)
+    assert w_fast == pytest.approx(w_exact, rel=0.03)
+    assert np.abs(fast - exact).sum() / t_exact < 0.03
+
+
+def test_blurred_star_renderer_handles_frame_edges():
+    from camera_sim.image_synth import _render_blurred_stars
+
+    img = np.zeros((300, 300))
+    # A star 20 px outside the left edge still spills light into the frame,
+    # and none of it wraps around onto the opposite edge.
+    _render_blurred_stars(img, np.array([-20.0]), np.array([150.0]), np.array([1e6]), 30.0)
+    assert 0.2 < img.sum() / 1e6 < 0.3
+    assert img[:, -10:].sum() < 1e-3
+
+
+def test_heavily_defocused_full_frame_renders_quickly():
+    """Regression: ~17mm of defocus (sigma ~400 px) made a 6248x4176 frame
+    take ~30s to render, past clients' exposure timeouts."""
+    import time
+
+    cam = _base_cam(num_pixels_x=6248, num_pixels_y=4176)
+    rng = np.random.default_rng(0)
+    stars = ProjectedStars(rng.uniform(0, 6248, 400), rng.uniform(0, 4176, 400), np.full(400, 9.0))
+    start = time.perf_counter()
+    render_frame(stars, cam, 1.0, True, 0, 800.0, 200.0, -17300.0, 20.0, rng)
+    assert time.perf_counter() - start < 10.0
